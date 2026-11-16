@@ -7,6 +7,8 @@ import { makeHumanoid, setHeldGun, animateHumanoid } from '../core/models.js';
 import { blankIntent, settings } from '../core/input.js';
 import { clamp, damp, lerp, dirFromYawPitch, rand, setLayer, dist2D } from '../core/util.js';
 import { audio } from '../core/audio.js';
+import { assistStrength, autoFireOn, findAssistTarget, steerToward } from './aimassist.js';
+import { inputKind, glyph } from '../core/glyphs.js';
 
 export const PLAYER_LOOKS = [
   { name: 'Emeka', from: 'Nigeria', skin: 0x4a2c1a, top: 0xc0302a, pants: 0x3a3a3c, hat: 'braids', band: 0xff5a36 },
@@ -16,6 +18,7 @@ export const PLAYER_LOOKS = [
 ];
 
 const _v = new THREE.Vector3(), _d = new THREE.Vector3();
+export const ROLL_TIME = 0.55;
 
 export class Player extends Actor {
   constructor(game, index, input, look) {
@@ -59,6 +62,8 @@ export class Player extends Actor {
     this.switchT = 0; this.reloadT = 0; this.reloadTotal = 1; this.meleeT = 0; this.flashT = 0;
     this.gadget = null;
     this.slideDir = new THREE.Vector3(); this.slideSpeed = 0;
+    this.rollT = 0; this.rollCd = 0; this.rollDir = new THREE.Vector3(); this.rollSide = 0;
+    this.assist = null; this.autoFireT = 0;
     this.camY = 1.62; this.shake = 0;
     this.sprinting = false; this.noSprintT = 0;
     this.hold = { key: null, t: 0 };
@@ -138,7 +143,7 @@ export class Player extends Actor {
       this.ui.handle(it);
       it.moveX = it.moveZ = 0; it.fire = it.firePressed = it.ads = false; it.jump = false;
       it.lookX = it.lookY = 0; it.interactPressed = false; it.interact = false;
-      it.reload = false; it.molotov = it.flare = it.melee = false; it.callin = -1; it.slot = -1; it.cycle = 0;
+      it.reload = false; it.molotov = it.flare = it.melee = false; it.callin = -1; it.slot = -1; it.cycle = 0; it.roll = false; it.crouchPressed = false;
     }
 
     if (this.driving) { this.updateDriving(dt); return; }
@@ -146,8 +151,24 @@ export class Player extends Actor {
     // ---------------- Look ----------------
     const w = this.weapon;
     const zoom = lerp(1, w.adsZoom || 1, this.ads);
-    this.yaw -= it.lookX / zoom;
-    this.pitch = clamp(this.pitch - it.lookY / zoom, -1.45, 1.45);
+    const S = this.downed ? assistStrength(this) * 0.5 : assistStrength(this);
+    const a = this.assist;
+    const onTarget = a && a.angle < a.radius + 0.06 + 0.04 * this.ads;
+    // Friction: look input slows down while the crosshair is over or near an enemy.
+    const friction = S > 0 && onTarget ? 1 - 0.5 * S * (1 - Math.min(1, a.angle / (a.radius + 0.1))) : 1;
+    this.yaw -= (it.lookX / zoom) * friction;
+    this.pitch = clamp(this.pitch - (it.lookY / zoom) * friction, -1.45, 1.45);
+    if (S > 0 && a && !w.def.melee) {
+      const engaged = it.fire || it.ads || this.ads > 0.3 || this.autoFireT > 0;
+      const moving = Math.hypot(this.vel.x, this.vel.z) > 1.5;
+      // Tracking: follow the target while you strafe and shoot so it stays under the crosshair.
+      if (onTarget && (engaged || S >= 1)) {
+        const rate = S * (moving ? 7 : 3.5) * (engaged ? 1 : 0.5);
+        steerToward(this, a.point, Math.min(1, rate * dt));
+      }
+      // Aim snap when you start aiming down sights (controller and touch).
+      if (it.adsPressed && inputKind(this) !== 'kbm' && a.angle < 0.22 + a.radius) steerToward(this, a.point, 0.65 * S);
+    }
 
     // ---------------- Health ----------------
     if (!this.downed) {
@@ -164,14 +185,33 @@ export class Player extends Actor {
     if (ml > 1) { mx /= ml; mz /= ml; }
     const wishX = fwdX * mz + rX * mx, wishZ = fwdZ * mz + rZ * mx;
 
+    // Roll: a quick dodge with a moment of invulnerability to gunfire.
+    this.rollCd = Math.max(0, this.rollCd - dt);
+    if (it.roll && this.rollT <= 0 && this.rollCd <= 0 && this.onGround && !this.downed && !this.driving) {
+      const wl = Math.hypot(wishX, wishZ);
+      if (wl > 0.2) this.rollDir.set(wishX / wl, 0, wishZ / wl);
+      else this.rollDir.set(-fwdX, 0, -fwdZ); // no input: roll backwards
+      this.rollSide = Math.sign(mx) || (mz < -0.2 ? 0 : 1);
+      this.rollT = ROLL_TIME; this.rollCd = 0.9;
+      this.sliding = 0; this.crouch = false; this.ads = 0;
+      audio.play('melee', this.pos, 0.45);
+      this.rumble(0.25, 0.4, 120);
+    }
     this.noSprintT = Math.max(0, this.noSprintT - dt);
     this.sprinting = it.sprint && mz > 0.3 && !this.downed && this.ads < 0.3 && this.noSprintT <= 0 && !this.crouch;
     if (this.sprinting && this.reloadT > 0 && w.def.slot !== 1) this.sprinting = it.sprint && mz > 0.3;
     let speed = this.sprinting ? 8.3 : 5.4;
     if (this.crouch) speed = 2.9;
-    speed *= lerp(1, 0.55, this.ads) * (w.def.moveMult || 1);
+    speed *= lerp(1, 0.72, this.ads) * (w.def.moveMult || 1);
     if (this.downed) speed = 0.9;
 
+    if (this.rollT > 0) {
+      this.rollT -= dt;
+      const k = Math.max(0, this.rollT / ROLL_TIME);
+      const sp = 11 * (0.35 + 0.65 * k);
+      this.vel.x = this.rollDir.x * sp;
+      this.vel.z = this.rollDir.z * sp;
+    } else
     // Slide
     if (it.crouchPressed && this.sprinting && this.onGround && this.sliding <= 0) {
       this.sliding = 0.8;
@@ -180,7 +220,7 @@ export class Player extends Actor {
       this.slideSpeed = 11.5;
       audio.play('melee', this.pos, 0.35);
     }
-    if (this.sliding > 0) {
+    if (this.rollT > 0) { /* handled above */ } else if (this.sliding > 0) {
       this.sliding -= dt;
       this.slideSpeed = Math.max(4, this.slideSpeed - 9 * dt);
       this.vel.x = this.slideDir.x * this.slideSpeed;
@@ -216,7 +256,7 @@ export class Player extends Actor {
         pr.action(this);
       }
     } else { this.hold.t = 0; this.hold.key = null; }
-    const padReloadBlocked = this.input && this.input.kind === 'pad' && pr;
+    const padReloadBlocked = inputKind(this) === 'pad' && pr;
 
     // ---------------- Weapons ----------------
     if (!this.downed || this.cur === 1) {
@@ -229,7 +269,7 @@ export class Player extends Actor {
     if (this.gadget) { this.gadget.t -= dt; if (this.gadget.t <= 0) { this.gadget = null; this.rebuildViewmodel(); } }
 
     const canUse = !this.downed || this.cur === 1;
-    const wantAds = it.ads && canUse && !w.def.melee && this.switchT <= 0 && !this.gadget && (!this.sprinting);
+    const wantAds = it.ads && canUse && !w.def.melee && this.switchT <= 0 && !this.gadget && !this.sprinting && this.rollT <= 0;
     this.ads = damp(this.ads, wantAds ? 1 : 0, 16, dt);
 
     // Reload
@@ -244,9 +284,13 @@ export class Player extends Actor {
       this.startReload();
     }
 
+    // Auto-fire (easy mode): shoot when the crosshair rests on an enemy.
+    this.autoFireT = Math.max(0, this.autoFireT - dt);
+    if (autoFireOn(this) && a && !a.isDrone && a.angle < a.radius + 0.02 && !w.def.melee && !w.def.projectile && w.mag > 0) this.autoFireT = 0.15;
+    const autoTrig = this.autoFireT > 0 && w.cool <= 0;
     // Fire
-    if (canUse && !w.def.melee && this.switchT <= 0 && this.reloadT <= 0 && !this.gadget && !this.ui) {
-      const trig = w.def.auto ? it.fire : it.firePressed;
+    if (canUse && !w.def.melee && this.switchT <= 0 && this.reloadT <= 0 && !this.gadget && !this.ui && this.rollT <= 0.08) {
+      const trig = (w.def.auto ? it.fire : it.firePressed) || autoTrig;
       if (trig && w.cool <= 0) {
         if (w.mag <= 0) {
           if (w.reserve > 0) this.startReload();
@@ -279,12 +323,18 @@ export class Player extends Actor {
       this.rebuildViewmodel();
       g.fireFlare(this);
     }
+    if (this.queuedCallin != null) { if (it.callin < 0) it.callin = this.queuedCallin; this.queuedCallin = null; }
     if (it.callin >= 0 && !this.downed) g.momentum.activate(it.callin, this);
     if (it.pause) g.requestPause();
 
     this.updateCamera(dt);
     this.updateBody(dt);
+    // Find the assist target for the next frame (uses the updated camera).
+    const S2 = assistStrength(this);
+    this.assist = (S2 > 0 || autoFireOn(this)) && !this.downed ? findAssistTarget(g, this, 0.05 + 0.07 * S2) : null;
   }
+
+  rumble(s, w, ms) { this.input?.rumble?.(s, w, ms); }
 
   startReload() {
     const w = this.weapon;
@@ -296,18 +346,27 @@ export class Player extends Actor {
   fire(w) {
     const g = this.game;
     this.stats.shots++;
-    const moving = Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.018 : 0;
-    let spread = lerp(w.spreadHip + moving + this.bloom, w.spreadAds + this.bloom * 0.35, this.ads);
+    const moving = Math.hypot(this.vel.x, this.vel.z) > 1 ? 0.006 : 0;
+    let spread = lerp(w.spreadHip * 0.85 + moving + this.bloom, w.spreadAds + this.bloom * 0.3, this.ads);
     if (!this.onGround) spread += 0.03;
     if (this.sliding > 0) spread += 0.01;
     if (this.downed) spread += 0.02;
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     const dir = this.camera.getWorldDirection(new THREE.Vector3());
+    // Bullet magnetism: shots that would just miss bend onto the target.
+    const S = assistStrength(this);
+    const a = this.assist;
+    if (S > 0 && a && !a.target.dead && a.angle < a.radius + 0.02 + 0.035 * S) {
+      const to = a.point.clone().sub(origin).normalize();
+      dir.lerp(to, 0.6 + 0.35 * S).normalize();
+      spread *= 1 - 0.55 * S;
+    }
     g.playerFire(this, w, origin, dir, spread);
+    this.rumble(w.def.projectile ? 0.8 : 0.15, w.def.projectile ? 0.6 : 0.3, w.def.projectile ? 220 : 60);
     const rk = w.def.recoil * (this.ads > 0.5 ? 0.65 : 1) * (this.crouch ? 0.8 : 1);
     this.recoilP += rk;
     this.recoilY += rand(-rk, rk) * 0.6;
-    this.bloom = Math.min(0.06, this.bloom + (w.def.auto ? 0.006 : 0.012));
+    this.bloom = Math.min(0.045, this.bloom + (w.def.auto ? 0.004 : 0.01));
     this.kick = 1;
     this.flashT = w.suppressed ? 0 : 0.045;
     this.noSprintT = 0.35;
@@ -346,7 +405,10 @@ export class Player extends Actor {
     }
     this.camera.fov = settings.fov;
     this.camera.updateProjectionMatrix();
-    this.prompt = { text: 'Drive: [W/S] speed · [A/D] steer · [E] back to the truck bed' };
+    const k = inputKind(this);
+    this.prompt = { text: k === 'pad' ? 'Driving — left stick: steer &amp; speed · <kbd>' + glyph(this, 'interact') + '</kbd> back to the truck bed'
+      : k === 'touch' ? 'Driving — joystick: steer &amp; speed · <kbd>USE</kbd> back to the truck bed'
+      : 'Driving — <kbd>W</kbd>/<kbd>S</kbd> speed · <kbd>A</kbd>/<kbd>D</kbd> steer · <kbd>E</kbd> back to the truck bed' };
     this.vmHolder.visible = false;
     this.body.visible = false;
   }
@@ -360,10 +422,11 @@ export class Player extends Actor {
     const c = this.camera;
     c.position.set(this.pos.x + Math.cos(this.yaw) * bx, this.pos.y + this.camY + by, this.pos.z - Math.sin(this.yaw) * bx);
     const sh = this.shake * this.shake;
+    const rk = this.rollT > 0 ? Math.sin((1 - this.rollT / ROLL_TIME) * Math.PI) : 0;
     c.rotation.set(
-      this.pitch + this.recoilP + (Math.random() - 0.5) * sh * 0.08,
+      this.pitch + this.recoilP + (Math.random() - 0.5) * sh * 0.08 - rk * 0.35,
       this.yaw + this.recoilY + (Math.random() - 0.5) * sh * 0.08,
-      this.sliding > 0 ? 0.06 : (this.downed ? 0.25 : 0),
+      this.sliding > 0 ? 0.06 : (this.downed ? 0.25 : rk * 0.4 * (this.rollSide || 1) * -1),
     );
     const fov = settings.fov / lerp(1, w.adsZoom || 1, this.ads);
     if (Math.abs(c.fov - fov) > 0.01) { c.fov = fov; c.updateProjectionMatrix(); }
@@ -410,6 +473,7 @@ export class Player extends Actor {
       else { x = 0.12; y = -0.12; z = -0.34; rx += Math.max(0, 0.55 - k) * 1.2; }
     }
     if (this.downed) { y -= 0.06; rz += 0.3; }
+    if (this.rollT > 0) { const k = Math.sin((1 - this.rollT / ROLL_TIME) * Math.PI); y -= 0.3 * k; rx -= 0.6 * k; }
     vm.position.set(x, y, z);
     vm.rotation.set(rx, ry, rz);
     vm.userData.flash.visible = this.flashT > 0;
@@ -426,7 +490,8 @@ export class Player extends Actor {
     animateHumanoid(b, {
       move: this.downed ? 0 : Math.min(1, Math.hypot(this.vel.x, this.vel.z) / 4),
       t: this._animT, aiming: this.weapon.type !== 'shovel', aimPitch: this.pitch * 0.6,
-      crouch: this.crouch || this.sliding > 0, downed: this.downed, dead: this.dead, deadT: 1,
+      crouch: this.crouch || this.sliding > 0 || this.rollT > 0, downed: this.downed,
+      roll: this.rollT > 0 ? 1 - this.rollT / ROLL_TIME : 0, dead: this.dead, deadT: 1,
       reviving: this.hold.key && this.hold.key.startsWith('revive') && this.intent.interact,
       surrender: this.surrendered,
     });

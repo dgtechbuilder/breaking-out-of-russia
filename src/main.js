@@ -1,6 +1,7 @@
 // Boot, menus, co-op lobby and the main loop.
 import * as THREE from 'three';
-import { KeyboardMouse, GamepadInput, settings } from './core/input.js';
+import { KeyboardMouse, GamepadInput, HybridInput, settings, isTouchDevice } from './core/input.js';
+import { TouchInput } from './core/touch.js';
 import { audio } from './core/audio.js';
 import { Game, DIFFICULTY } from './game/game.js';
 import { STAGES, stageById } from './stages/index.js';
@@ -12,9 +13,13 @@ settings.load();
 const canvas = document.getElementById('view');
 const hudRoot = document.getElementById('hudroot');
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.75));
-renderer.setSize(window.innerWidth, window.innerHeight, false);
-renderer.shadowMap.enabled = true;
+function applyQuality() {
+  const low = settings.lowQuality;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, low ? 1.25 : 1.75));
+  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  renderer.shadowMap.enabled = !low;
+}
+applyQuality();
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
@@ -23,6 +28,9 @@ renderer.autoClear = false;
 
 const kbm = new KeyboardMouse(canvas);
 const pads = []; // joined GamepadInput instances (P2..P4)
+const touch = new TouchInput();
+const freePads = () => [...(navigator.getGamepads?.() || [])].filter((g) => g && !pads.some((p) => p.index === g.index)).map((g) => g.index);
+const p1Input = new HybridInput(kbm, freePads, touch);
 const state = {
   screen: 'title', prev: 'title', game: null, stageId: 'camp', campaign: false,
   difficulty: 'veteran', progress: loadProgress(),
@@ -36,7 +44,7 @@ function loadProgress() {
 function saveProgress() {
   try { localStorage.setItem('bfr_progress', JSON.stringify(state.progress)); } catch { /* ignore */ }
 }
-try { state.difficulty = localStorage.getItem('bfr_diff') || 'veteran'; } catch { /* ignore */ }
+try { state.difficulty = localStorage.getItem('bfr_diff') || (isTouchDevice() ? 'recruit' : 'veteran'); } catch { /* ignore */ }
 
 // ------------------------------------------------------------------ screens
 const $ = (s) => document.querySelector(s);
@@ -49,6 +57,10 @@ function show(name) {
   if (name === 'settings') renderSettings();
   if (name !== 'play') document.exitPointerLock?.();
   $('#clickToPlay').style.display = 'none';
+  touch.setVisible(name === 'play');
+  document.body.classList.toggle('playing', name === 'play');
+  document.querySelectorAll('.padfocus').forEach((e) => e.classList.remove('padfocus'));
+  if (name !== 'play' && performance.now() - lastPadNav < 60000) setTimeout(() => navMove(0), 30);
 }
 
 document.addEventListener('click', (e) => {
@@ -65,7 +77,7 @@ document.addEventListener('click', (e) => {
 function renderStages() {
   $('#stageCards').innerHTML = STAGES.map((s, i) => {
     const best = state.progress[s.id];
-    return `<div class="card" data-stage="${s.id}"><div class="num">STAGE ${i + 1}</div><h3>${s.name}</h3><p>${s.subtitle}</p>
+    return `<div class="card" tabindex="0" role="button" data-stage="${s.id}"><div class="num">STAGE ${i + 1}</div><h3>${s.name}</h3><p>${s.subtitle}</p>
       <p>${['Close-quarters shootout through the sleeping quarters, armory and main gate. Start with nothing but a shovel.',
         'One of you drives the stolen Ural; everyone else hangs out the back and fends off technicals and roadblocks.',
         'Waves of troops, snipers and fortified roadblocks across a cratered highway to the Ukrainian line.'][i]}</p>
@@ -91,6 +103,14 @@ function renderSettings() {
     el.oninput = () => { settings[key] = Number(el.value); v.textContent = fmt(settings[key]); settings.save(); if (key === 'volume') audio.setVolume(settings.volume); };
   };
   bind('sens', 'sensitivity', (x) => x.toFixed(2));
+  bind('padSens', 'padSensitivity', (x) => x.toFixed(2));
+  bind('touchSens', 'touchSensitivity', (x) => x.toFixed(2));
+  const seg = (id, key, opts) => segment($('#' + id), opts, settings[key], (v) => { settings[key] = v === 'true' ? true : v === 'false' ? false : v; settings.save(); if (key === 'quality') applyQuality(); if (key === 'touchControls') { touch.enabled = v === 'on' || (v === 'auto' && isTouchDevice()); touch.refresh(); } });
+  seg('aaSeg', 'aimAssist', [['auto', 'Auto'], ['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']]);
+  seg('afSeg', 'autoFire', [['auto', 'Touch only'], ['on', 'On'], ['off', 'Off']]);
+  seg('rumbleSeg', 'rumble', [[true, 'On'], [false, 'Off']]);
+  seg('touchSeg', 'touchControls', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']]);
+  seg('qualSeg', 'quality', [['auto', 'Auto'], ['high', 'High'], ['low', 'Low (mobile)']]);
   bind('fov', 'fov', (x) => `${x}°`);
   bind('vol', 'volume', (x) => `${Math.round(x * 100)}%`);
   segment($('#invSeg'), [[0, 'Off'], [1, 'On']], settings.invertY ? 1 : 0, (v) => { settings.invertY = v === '1'; settings.save(); });
@@ -105,7 +125,7 @@ function renderDiff(el) {
 }
 
 function renderSlots() {
-  const slots = [{ label: 'Keyboard + Mouse', on: true }, ...[0, 1, 2].map((i) => (pads[i] ? { label: pads[i].label, on: true } : { label: 'Press A / Start on a gamepad', on: false }))];
+  const slots = [{ label: 'Keyboard, mouse, touch or controller', on: true }, ...[0, 1, 2].map((i) => (pads[i] ? { label: `${pads[i].label} · ${pads[i].padType() === 'ps' ? 'PlayStation' : pads[i].padType() === 'switch' ? 'Switch' : 'Xbox'} layout`, on: true } : { label: 'Press A or Start on another controller', on: false }))];
   $('#slots').innerHTML = slots.map((s, i) => {
     const look = PLAYER_LOOKS[i];
     const c = '#' + look.band.toString(16).padStart(6, '0');
@@ -114,24 +134,87 @@ function renderSlots() {
   renderDiff($('#diffSeg'));
 }
 
-// Gamepad join/leave (polled while in the co-op lobby or title).
+// ------------------------------------------------------------------ controllers in menus
+// Any controller navigates menus (D-pad/stick, A select, B back). In the co-op lobby, another
+// controller pressing A or Start joins as the next player; B or Start leaves.
 const padPrev = {};
+let menuPad = null;
+let lastPadNav = -1e9;
+
+function focusables() {
+  const scr = document.querySelector('.screen.show');
+  if (!scr) return [];
+  return [...scr.querySelectorAll('button, .card, input[type=range]')].filter((e) => e.offsetParent !== null);
+}
+
+function navMove(dir) {
+  const list = focusables();
+  if (!list.length) return;
+  let i = list.indexOf(document.activeElement);
+  i = i < 0 ? (dir < 0 ? list.length - 1 : 0) : (i + dir + list.length) % list.length;
+  const el = list[i];
+  document.querySelectorAll('.padfocus').forEach((e) => e.classList.remove('padfocus'));
+  el.classList.add('padfocus');
+  el.focus({ preventScroll: true });
+  el.scrollIntoView({ block: 'nearest' });
+}
+
+function navActivate() {
+  const el = document.activeElement;
+  if (!el || !focusables().includes(el)) { navMove(0); return; }
+  if (el.matches('input[type=range]')) return;
+  audio.init();
+  el.click();
+}
+
+function navBack() {
+  if (state.screen === 'pause') { resume(); return; }
+  const scr = document.querySelector('.screen.show');
+  const b = scr && (scr.querySelector('[data-go=back]') || scr.querySelector('[data-go=title]'));
+  if (b && b.offsetParent !== null) b.click();
+}
+
+function navAdjust(dir) {
+  const el = document.activeElement;
+  if (el && el.matches('input[type=range]') && focusables().includes(el)) {
+    el.value = String(Number(el.value) + dir * Number(el.step || 1));
+    el.dispatchEvent(new Event('input'));
+    return true;
+  }
+  return false;
+}
+
 function pollPads() {
-  const gps = navigator.getGamepads ? navigator.getGamepads() : [];
+  const gps = [...(navigator.getGamepads?.() || [])].filter(Boolean);
   let changed = false;
   for (const gp of gps) {
-    if (!gp) continue;
-    const prev = padPrev[gp.index] || [];
-    const pressed = (i) => gp.buttons[i]?.pressed && !prev[i];
+    const prev = padPrev[gp.index] || { b: [], ax: [] };
+    const pr = (i) => gp.buttons[i]?.pressed && !prev.b[i];
+    const edge = (a, d) => (d < 0 ? gp.axes[a] < -0.6 && !(prev.ax[a] < -0.6) : gp.axes[a] > 0.6 && !(prev.ax[a] > 0.6));
     const joined = pads.find((p) => p.index === gp.index);
-    if (state.screen === 'coop' || state.screen === 'title') {
-      if (!joined && (pressed(0) || pressed(9)) && pads.length < 3) { pads.push(new GamepadInput(gp.index)); changed = true; audio.init(); audio.play('pickup', null, 0.5); }
-      else if (joined && pressed(1)) { pads.splice(pads.indexOf(joined), 1); changed = true; }
+    let used = false;
+    if (state.screen === 'coop') {
+      if (!joined && pads.length < 3 && (pr(9) || (pr(0) && gp.index !== menuPad))) {
+        pads.push(new GamepadInput(gp.index)); changed = true; used = true;
+        if (menuPad === gp.index) menuPad = null;
+        audio.init(); audio.play('pickup', null, 0.5);
+      } else if (joined && (pr(1) || pr(9))) { pads.splice(pads.indexOf(joined), 1); changed = true; used = true; }
     }
-    padPrev[gp.index] = gp.buttons.map((b) => b.pressed);
+    if (state.screen !== 'play' && !used && !(state.screen === 'coop' && joined)) {
+      const up = pr(12) || edge(1, -1), down = pr(13) || edge(1, 1);
+      const left = pr(14) || edge(0, -1), right = pr(15) || edge(0, 1);
+      if (up || down || left || right) {
+        menuPad = gp.index; lastPadNav = performance.now();
+        if ((left || right) && navAdjust(left ? -1 : 1)) { /* slider */ }
+        else navMove(up || left ? -1 : 1);
+      }
+      if (pr(0)) { menuPad = gp.index; lastPadNav = performance.now(); navActivate(); }
+      if (pr(1)) navBack();
+      if (pr(9) && state.screen === 'pause') resume();
+    }
+    padPrev[gp.index] = { b: gp.buttons.map((x) => x.pressed), ax: [...gp.axes] };
   }
-  if (changed && state.screen === 'coop') renderSlots();
-  if (changed && state.screen === 'title') show('coop');
+  if (changed) renderSlots();
 }
 window.addEventListener('gamepaddisconnected', (e) => {
   const i = pads.findIndex((p) => p.index === e.gamepad.index);
@@ -158,14 +241,19 @@ function startStage(id) {
   const stage = stageById(id);
   state.game = new Game({
     renderer, hudRoot, stage, difficulty: state.difficulty,
-    inputs: [kbm, ...pads],
+    inputs: [p1Input, ...pads],
     onEnd: (r) => endStage(r),
     onPause: () => pause(),
   });
   state.game.input0Relock = () => { if (state.screen === 'play') kbm.requestLock(); };
   show('play');
-  kbm.requestLock();
-  $('#clickToPlay').style.display = kbm.locked ? 'none' : 'block';
+  if (touch.enabled) {
+    // Phones: go full screen in landscape where the browser allows it.
+    document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
+  } else {
+    kbm.requestLock();
+    $('#clickToPlay').style.display = kbm.locked ? 'none' : 'block';
+  }
 }
 
 function pause() {
@@ -182,7 +270,7 @@ function resume() {
   if (!g) return;
   g.paused = false;
   show('play');
-  kbm.requestLock();
+  if (!touch.enabled && performance.now() - lastPadNav > 3000) kbm.requestLock();
 }
 $('#resume').addEventListener('click', resume);
 $('#restart').addEventListener('click', () => startStage(state.stageId));
@@ -226,16 +314,17 @@ function endStage(r) {
 // Pointer lock handling
 canvas.addEventListener('click', () => {
   audio.init();
-  if (state.screen === 'play' && !kbm.locked) kbm.requestLock();
+  if (state.screen === 'play' && !kbm.locked && performance.now() - touch.lastActive > 1500) kbm.requestLock();
 });
+window.addEventListener('touchstart', () => audio.init(), { passive: true });
 document.addEventListener('pointerlockchange', () => {
   const locked = document.pointerLockElement === canvas;
-  $('#clickToPlay').style.display = state.screen === 'play' && !locked && !kbm.dragLook ? 'block' : 'none';
+  $('#clickToPlay').style.display = state.screen === 'play' && !locked && !kbm.dragLook && !touch.enabled ? 'block' : 'none';
   if (!locked && state.screen === 'play' && state.game && !state.game.over && !state.game.players.some((p) => p.ui)) pause();
 });
 
 window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight, false);
+  applyQuality();
   state.game?.layoutViewports();
 });
 
@@ -260,14 +349,6 @@ function loop(now) {
     renderer.setScissorTest(false);
     renderer.setClearColor(0x07080a, 1);
     renderer.clear();
-  }
-  // Start button on a pad resumes from the pause menu (pausing is handled by the player's intent).
-  if (g && state.screen === 'pause') {
-    for (const p of pads) {
-      const gp = navigator.getGamepads?.()[p.index];
-      if (gp && gp.buttons[9]?.pressed && !padPrev['s' + p.index]) resume();
-      padPrev['s' + p.index] = gp?.buttons[9]?.pressed;
-    }
   }
 }
 requestAnimationFrame(loop);

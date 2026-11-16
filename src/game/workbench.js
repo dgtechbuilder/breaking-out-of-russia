@@ -60,9 +60,9 @@ export class WorkbenchUI {
       <h3>FIELD WORKBENCH</h3>
       <div class="wb-stash">Stash: Optics <b>${st.optic}</b> · Drums <b>${st.drum}</b> · Suppressors <b>${st.suppressor}</b> · Fuel <b>${st.fuel}</b> · Flare kits <b>${st.flarekit}</b></div>
       <ul>${items.map((it, i) => `<li class="${i === this.sel ? 'sel' : ''} ${it.ok ? '' : 'dis'} ${it.on ? 'on' : ''}" data-i="${i}"><span>${it.label}</span><em>${it.state}</em></li>`).join('')}</ul>
-      <div class="wb-help">W/S or D-pad to select · E / A to apply · C / B / Esc to close · or click</div>`;
+      <div class="wb-help">W/S or D-pad to select · E / A to apply · C / B / Esc to close · or tap an item</div>`;
     this.el.querySelectorAll('li').forEach((li) => {
-      li.addEventListener('mousedown', (e) => { e.stopPropagation(); this.sel = Number(li.dataset.i); this.apply(); });
+      li.addEventListener('pointerdown', (e) => { e.stopPropagation(); this.sel = Number(li.dataset.i); this.apply(); });
     });
   }
 

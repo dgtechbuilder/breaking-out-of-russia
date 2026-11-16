@@ -2,7 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Breakout from Russia</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -17,7 +19,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: #07080a; color: var(--text); font-family: var(--cond); overflow: hidden; user-select: none; }
 canvas#view { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
-#hudroot { position: fixed; inset: 0; pointer-events: none; }
+#hudroot { position: fixed; inset: 0; pointer-events: none; z-index: 5; }
 kbd { font-family: var(--cond); font-weight: 800; background: #f3efe8; color: #111; padding: 0 .45em; border-radius: 3px; margin: 0 .25em; font-size: .95em; }
 
 /* ---------------- HUD ---------------- */
@@ -214,13 +216,74 @@ input[type=range] { width: 220px; accent-color: var(--red); }
 .note { font-size: 14px; opacity: .6; margin-top: 30px; max-width: 760px; line-height: 1.45; }
 #clickToPlay { position: fixed; left: 50%; bottom: 14%; transform: translateX(-50%); background: rgba(0,0,0,.7); padding: 10px 22px; font-weight: 800; letter-spacing: .12em; display: none; z-index: 5; pointer-events: none; }
 #loading { position: fixed; inset: 0; display: grid; place-items: center; font-family: var(--marker); font-size: 28px; z-index: 20; background: #07080a; }
+
+/* ---------------- Touch controls ---------------- */
+#touchui { position: fixed; inset: 0; z-index: 4; display: none; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
+#touchui .stick { position: absolute; width: 124px; height: 124px; margin: -62px 0 0 -62px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); background: rgba(0,0,0,.18); display: none; pointer-events: none; }
+#touchui .knob { position: absolute; left: 50%; top: 50%; width: 56px; height: 56px; border-radius: 50%; background: rgba(255,255,255,.55); box-shadow: 0 0 12px rgba(0,0,0,.5); }
+#touchui .tb { position: absolute; width: 62px; height: 62px; border-radius: 50%; border: 2px solid rgba(255,255,255,.45); background: rgba(12,14,18,.42); color: #fff; font-family: var(--cond); font-weight: 800; font-size: 12px; letter-spacing: .06em; padding: 0; touch-action: none; }
+#touchui .tb.down, #touchui .tb.on { background: rgba(255,200,58,.45); border-color: var(--gold); }
+#touchui .tb.big { width: 96px; height: 96px; font-size: 17px; background: rgba(196,35,26,.55); border-color: var(--red); }
+#touchui .tb.big.down { background: rgba(255,59,42,.8); }
+#touchui .tb.small { width: 50px; height: 50px; font-size: 10px; }
+#touchui .tb.gadget { border-radius: 12px; }
+#touchui .tb.use { width: 74px; height: 74px; display: none; background: rgba(58,200,255,.45); border-color: #3ac8ff; font-size: 15px; }
+#touchui .tb.use.show { display: block; }
+#touchui .tb.pause { width: 44px; height: 44px; font-size: 14px; border-radius: 10px; }
+#touchui .rc { position: absolute; right: env(safe-area-inset-right, 0px); bottom: 0; width: 300px; height: 270px; transform: scale(var(--ts, 1)); transform-origin: bottom right; pointer-events: none; }
+#touchui .lc { position: absolute; left: 0; top: 0; pointer-events: none; }
+#touchui .rc .tb, #touchui .lc .tb { pointer-events: auto; }
+#touchui [data-btn=fire] { right: 96px; bottom: 20px; }
+#touchui [data-btn=jump] { right: 12px; bottom: 24px; }
+#touchui [data-btn=crouch] { right: 12px; bottom: 98px; }
+#touchui [data-btn=ads] { right: 112px; bottom: 128px; }
+#touchui [data-btn=roll] { right: 200px; bottom: 20px; }
+#touchui [data-btn=swap] { right: 196px; bottom: 96px; }
+#touchui [data-btn=reload] { right: 18px; bottom: 172px; }
+#touchui [data-btn=melee] { right: 72px; bottom: 196px; }
+#touchui [data-btn=use] { right: 190px; bottom: 160px; }
+#touchui [data-btn=molotov] { position: fixed; left: calc(12px + env(safe-area-inset-left, 0px)); top: 194px; width: 46px; height: 46px; }
+#touchui [data-btn=flare] { position: fixed; left: calc(66px + env(safe-area-inset-left, 0px)); top: 194px; width: 46px; height: 46px; }
+#touchui [data-btn=pause] { position: fixed; right: calc(12px + env(safe-area-inset-right, 0px)); top: 96px; }
+/* HUD rearranged around the thumbs on touch screens */
+body.touch .hud .minimap { width: calc(120px * var(--s)); height: calc(120px * var(--s)); left: 12px; top: 10px; }
+body.touch .hud .feed { display: none; }
+body.touch .hud .vitals { left: calc(140px * var(--s) + 6px); top: 10px; bottom: auto; transform: scale(.7); transform-origin: top left; }
+body.touch .hud .ammo { right: auto; left: 50%; bottom: 8px; transform: translateX(-50%) scale(.75); transform-origin: bottom center; text-align: center; }
+body.touch .hud .ammo .gadgets { justify-content: center; }
+body.touch .hud .squad { transform: scale(.65); transform-origin: top right; right: 10px; top: 6px; }
+body.touch .hud .squad .sqbar { width: 110px; }
+body.touch .hud .momentum { top: auto; bottom: 84px; right: auto; left: 50%; transform: translateX(-50%); width: 160px; }
+body.touch .hud .mom-label { text-align: center; font-size: .6em; }
+body.touch .hud .objective { top: 56px; max-width: 46%; }
+body.touch .hud .obj-title { font-size: 1.1em; }
+body.touch .hud .obj-sub, body.touch .hud .reinf { font-size: .7em; }
+body.touch .hud .reinf { top: 104px; }
+body.touch .hud .callins { left: 12px; right: auto; top: 140px; flex-direction: row; gap: 8px; pointer-events: auto; transform: none; }
+body.touch .hud .callin { width: 46px; height: 46px; }
+body.touch .hud .callin .ci-name { display: none; }
+body.touch .hud .callin .ci-key { display: none; }
+body.touch .hud .prompt { top: 30%; }
+body.touch .hud .gadgets em { display: none; }
+#rotate { position: fixed; inset: 0; z-index: 30; display: none; place-items: center; text-align: center; padding: 24px; background: #07080a; font-family: var(--marker); font-size: 26px; }
+@media (orientation: portrait) { body.touch.playing #rotate { display: grid; } }
+.cross.on-target i { background: var(--red); }
+.padfocus { outline: 3px solid var(--gold) !important; outline-offset: 3px; }
+.card.padfocus { background: rgba(255,60,40,.14); }
+.hint { opacity: .6; font-size: 14px; }
+.ctable { display: grid; gap: 0; font-size: 16px; overflow-x: auto; }
+.ctable > div { display: grid; grid-template-columns: 1.1fr 1.3fr 1.5fr 1.5fr; gap: 12px; padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,.08); min-width: 640px; }
+.ctable .ch { font-weight: 800; letter-spacing: .1em; text-transform: uppercase; font-size: 13px; opacity: .75; }
+.ctable > div span:first-child { font-weight: 700; }
 @media (max-width: 700px) { .inner { padding: 28px 16px; } .row label { min-width: 0; } }
+@media (max-height: 500px) { .inner { padding-top: 18px; } .logo { font-size: 44px; margin: 4px 0 8px; } .tag { font-size: 15px; } button.b { font-size: 16px; padding: 9px 18px; } }
 </style>
 </head>
 <body>
 <canvas id="view"></canvas>
 <div id="hudroot"></div>
-<div id="clickToPlay">CLICK TO TAKE CONTROL</div>
+<div id="clickToPlay">CLICK TO USE THE MOUSE · CONTROLLER READY</div>
+<div id="rotate">Turn your phone sideways to play</div>
 <div id="loading">Loading…</div>
 
 <section class="screen" id="s-title"><div class="inner">
@@ -234,7 +297,7 @@ input[type=range] { width: 220px; accent-color: var(--red); }
     <button class="b" data-go="settings">Settings</button>
     <button class="b" data-go="controls">Controls</button>
   </div>
-  <p class="note">Single player: three AI brothers fight with you. Local co-op: plug in up to three gamepads for 2–4 player split-screen — each human replaces an AI squadmate. A work of fiction, inspired by reports of foreign workers coerced into military service.</p>
+  <p class="note">Plays with keyboard &amp; mouse, a controller (Xbox, PlayStation, Switch Pro), or touch on phones and tablets. Single player: three AI brothers fight with you. Local co-op: plug in up to three gamepads for 2–4 player split-screen — each human replaces an AI squadmate. A work of fiction, inspired by reports of foreign workers coerced into military service.</p>
 </div></section>
 
 <section class="screen" id="s-stages"><div class="inner">
@@ -253,7 +316,14 @@ input[type=range] { width: 220px; accent-color: var(--red); }
 
 <section class="screen" id="s-settings"><div class="inner">
   <h2>Settings</h2>
-  <div class="row"><label>Look sensitivity</label><input type="range" id="sens" min="0.2" max="3" step="0.05"><span id="sensV"></span></div>
+  <div class="row"><label>Mouse sensitivity</label><input type="range" id="sens" min="0.2" max="3" step="0.05"><span id="sensV"></span></div>
+  <div class="row"><label>Controller sensitivity</label><input type="range" id="padSens" min="0.3" max="2.5" step="0.05"><span id="padSensV"></span></div>
+  <div class="row"><label>Touch sensitivity</label><input type="range" id="touchSens" min="0.3" max="2.5" step="0.05"><span id="touchSensV"></span></div>
+  <div class="row"><label>Aim assist</label><div class="seg" id="aaSeg"></div><small class="hint">Auto: light on mouse, strong on controller and touch</small></div>
+  <div class="row"><label>Auto-fire</label><div class="seg" id="afSeg"></div><small class="hint">Shoots when your crosshair is on an enemy</small></div>
+  <div class="row"><label>Controller rumble</label><div class="seg" id="rumbleSeg"></div></div>
+  <div class="row"><label>Touch controls</label><div class="seg" id="touchSeg"></div></div>
+  <div class="row"><label>Graphics</label><div class="seg" id="qualSeg"></div></div>
   <div class="row"><label>Field of view</label><input type="range" id="fov" min="65" max="100" step="1"><span id="fovV"></span></div>
   <div class="row"><label>Volume</label><input type="range" id="vol" min="0" max="1" step="0.05"><span id="volV"></span></div>
   <div class="row"><label>Invert look Y</label><div class="seg" id="invSeg"><button data-v="0">Off</button><button data-v="1">On</button></div></div>
@@ -263,25 +333,25 @@ input[type=range] { width: 220px; accent-color: var(--red); }
 
 <section class="screen" id="s-controls"><div class="inner">
   <h2>Controls</h2>
-  <div class="controls">
-    <div><span>Move</span><span>W A S D · Left stick</span></div>
-    <div><span>Look</span><span>Mouse · Right stick</span></div>
-    <div><span>Fire / Aim down sights</span><span>LMB / RMB · RT / LT</span></div>
-    <div><span>Sprint</span><span>Shift · L3</span></div>
-    <div><span>Slide (while sprinting)</span><span>C · B</span></div>
-    <div><span>Crouch</span><span>Hold C · Hold B</span></div>
-    <div><span>Jump</span><span>Space · A</span></div>
-    <div><span>Reload</span><span>R · X</span></div>
-    <div><span>Interact / Revive (hold)</span><span>E · Hold X</span></div>
-    <div><span>Weapons</span><span>1 2 3 / Wheel · Y (D-down: RPG)</span></div>
-    <div><span>Melee / Takedown</span><span>V · R3</span></div>
-    <div><span>Molotov</span><span>Q · LB</span></div>
-    <div><span>Flare gun</span><span>F · RB</span></div>
-    <div><span>Jammer Pulse (25)</span><span>Z · D-left</span></div>
-    <div><span>Brotherhood Rally (50)</span><span>X · D-up</span></div>
-    <div><span>Stolen Mortar (75)</span><span>B · D-right</span></div>
-    <div><span>Pause</span><span>Esc / P · Start</span></div>
+  <div class="ctable">
+    <div class="ch"><span>Action</span><span>Keyboard &amp; mouse</span><span>Controller (Xbox · PlayStation)</span><span>Touch</span></div>
+    <div><span>Move</span><span>W A S D</span><span>Left stick</span><span>Left thumb joystick</span></div>
+    <div><span>Look</span><span>Mouse</span><span>Right stick</span><span>Drag right side (or drag from FIRE)</span></div>
+    <div><span>Fire / Aim</span><span>LMB / RMB</span><span>RT · R2 / LT · L2</span><span>FIRE / AIM</span></div>
+    <div><span>Sprint</span><span>Shift</span><span>L3 (toggle)</span><span>Push joystick to the top edge</span></div>
+    <div><span>Roll</span><span>Alt, or double-tap a direction</span><span>B · ○ while moving</span><span>ROLL</span></div>
+    <div><span>Slide</span><span>C while sprinting</span><span>B · ○ while sprinting</span><span>CROUCH while sprinting</span></div>
+    <div><span>Crouch</span><span>Hold C</span><span>Hold B · ○</span><span>CROUCH (toggle)</span></div>
+    <div><span>Jump</span><span>Space</span><span>A · ✕</span><span>JUMP</span></div>
+    <div><span>Reload</span><span>R</span><span>X · □ (tap)</span><span>RELOAD</span></div>
+    <div><span>Interact / revive</span><span>E (hold to revive)</span><span>X · □ (hold)</span><span>USE</span></div>
+    <div><span>Switch weapon</span><span>1 2 3 / wheel</span><span>Y · △ (D-down: RPG)</span><span>SWAP</span></div>
+    <div><span>Melee / takedown</span><span>V</span><span>R3</span><span>MELEE</span></div>
+    <div><span>Molotov / flare</span><span>Q / F</span><span>LB · L1 / RB · R1</span><span>MOLOTOV / FLARE</span></div>
+    <div><span>Call-ins</span><span>Z / X / B</span><span>D-pad left / up / right</span><span>Tap the call-in icons</span></div>
+    <div><span>Pause</span><span>Esc / P</span><span>Start · Options</span><span>II</span></div>
   </div>
+  <p class="note">Menus work with a controller too: D-pad or stick to move, A to select, B to go back. Rolling makes you briefly immune to gunfire (not explosions). Aim assist and auto-fire can be changed in Settings.</p>
   <p class="note">Squad Momentum fills from kills — chain kills within a couple of seconds for big bonuses. Revives and objectives add momentum too. Scavenged optics, drum magazines and suppressors go into the squad stash; snap them on at any field workbench.</p>
   <div class="btns"><button class="b" data-go="back">Back</button></div>
 </div></section>

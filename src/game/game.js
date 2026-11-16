@@ -14,6 +14,7 @@ import { Weapon, WEAPONS, PART_NAMES } from './weapons.js';
 import { Momentum } from './momentum.js';
 import { HUD } from './hud.js';
 import { WorkbenchUI } from './workbench.js';
+import { glyph } from '../core/glyphs.js';
 
 export const DIFFICULTY = {
   recruit: { label: 'Recruit', enemyAcc: 0.7, enemyHp: 0.85, react: 1.25, playerDmg: 0.7 },
@@ -75,7 +76,7 @@ export class Game {
     this.scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(env.sunColor, env.sun ?? 1.8);
     sun.position.set(env.sunDir[0] * 60, env.sunDir[1] * 60, env.sunDir[2] * 60);
-    sun.castShadow = true;
+    sun.castShadow = !settings.lowQuality;
     sun.shadow.mapSize.set(2048, 2048);
     const sc = sun.shadow.camera;
     sc.left = -45; sc.right = 45; sc.top = 45; sc.bottom = -45; sc.near = 1; sc.far = 200;
@@ -92,7 +93,7 @@ export class Game {
     this.groundMesh = gm;
     // Snow
     if (env.snow) {
-      const n = 1800;
+      const n = settings.lowQuality ? 600 : 1800;
       const pos = new Float32Array(n * 3);
       for (let i = 0; i < n; i++) { pos[i * 3] = rand(-40, 40); pos[i * 3 + 1] = rand(0, 25); pos[i * 3 + 2] = rand(-40, 40); }
       const geo = new THREE.BufferGeometry();
@@ -246,14 +247,14 @@ export class Game {
         bd = d;
         const rt = this.reviveTime(p);
         best = {
-          key: 'revive' + s.id, hold: rt, text: `Hold <kbd>${p.input?.kind === 'pad' ? 'X' : 'E'}</kbd> Revive <b>${s.name}</b>`,
+          key: 'revive' + s.id, hold: rt, text: `Hold <kbd>${glyph(p, 'interact')}</kbd> Revive <b>${s.name}</b>`,
           onHold: (pl, dt) => { s.reviveProgress = Math.min(1, s.reviveProgress + dt / rt); s.reviveFrame = this.frameNo; s.reviveBy = pl; },
           action: (pl) => this.revive(s, pl),
         };
       }
     }
     if (best) return best;
-    const key = p.input?.kind === 'pad' ? 'X' : 'E';
+    const key = glyph(p, 'interact');
     for (const o of this.interactables) {
       if (o.dead || (o.enabled && !o.enabled(p))) continue;
       const d = dist2D(o.pos, p.pos);
@@ -540,6 +541,7 @@ export class Game {
     }
     // Squad member
     if (t.downed || t.surrendered || t.hidden) return;
+    if (t.dodging && !info.explosive && !info.fire) return; // rolled out of the line of fire
     if (t.isHuman) amount *= this.diff.playerDmg; else amount *= 0.75;
     if (t.armor > 0) { const a = Math.min(t.armor, amount * 0.75); t.armor -= a; amount -= a; }
     t.hp -= amount;
@@ -549,6 +551,7 @@ export class Game {
       if (info.dir) t.hud.damageFrom(info.dir);
       if (!t._hurtSnd || this.time - t._hurtSnd > 0.25) { audio.play('hurt', null, 0.5); t._hurtSnd = this.time; }
       t.shake = Math.max(t.shake, 0.15);
+      t.rumble?.(0.6, 0.3, 140);
     }
     if (t.hp <= 0) this.downActor(t);
   }
@@ -695,7 +698,7 @@ export class Game {
     const enemyOwned = owner && owner.team === 'enemy' || owner === null;
     for (const p of this.players) {
       const d = p.pos.distanceTo(pos);
-      if (d < radius * 4) p.shake = Math.max(p.shake, clamp(1.2 - d / (radius * 4), 0, 1));
+      if (d < radius * 4) { const k = clamp(1.2 - d / (radius * 4), 0, 1); p.shake = Math.max(p.shake, k); p.rumble(k, k * 0.6, 300); }
     }
     const from = pos.clone(); from.y += 0.4;
     const hitList = [...this.enemies, ...this.squad];

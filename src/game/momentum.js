@@ -22,7 +22,7 @@ export class Momentum {
     this.value = Math.min(this.max, this.value + n);
     for (const c of CALLINS) {
       if (before < c.cost && this.value >= c.cost) {
-        this.game.popup(`${c.name} ready  [${c.key}]`, null, 'callin');
+        this.game.popup(`${c.name} ready`, null, 'callin');
         audio.play('click', null, 0.5);
       }
     }

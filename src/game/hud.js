@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { CALLINS } from './momentum.js';
 import { fmtTime, clamp } from '../core/util.js';
+import { glyph, inputKind } from '../core/glyphs.js';
 
 const GUN_SVG = {
   rifle: 'M2 15 L21 12.5 L23 10.5 L58 10 L60 8 L64 8 L64 10 L97 10.2 L97 12 L66 12.6 L64 13.6 L55 13.6 L56 15 L53 24 L47 23 L50 15 L37 15.4 L34 22 L29 21 L31 15.6 L23 16.5 L4 21 Z',
@@ -74,6 +75,9 @@ export class HUD {
     this.cache = {};
     this.markerEls = [];
     this.mmT = 0;
+    this.q.callins.forEach((el, i) => el.addEventListener('pointerdown', (e) => { e.stopPropagation(); player.queuedCallin = i; }));
+    this.q.ciKeys = [...el.querySelectorAll('.ci-key')];
+    this.q.gKeys = [...el.querySelectorAll('.gadgets em')];
     this.q.pname.textContent = `P${player.index + 1} · ${player.name}`;
     this.q.pname.style.color = '#' + player.color.toString(16).padStart(6, '0');
   }
@@ -151,6 +155,17 @@ export class HUD {
     this.set('molop', Q.gMol, 'opacity', p.molotovs ? '1' : '0.35');
     this.set('flop', Q.gFl, 'opacity', p.flares ? '1' : '0.35');
 
+    // Device-specific button labels
+    const kind = inputKind(p) + (p.input?.padType ? p.input.padType() : '');
+    if (this.cache.kind !== kind) {
+      this.cache.kind = kind;
+      Q.ciKeys.forEach((k, i) => { k.textContent = glyph(p, 'callin' + i); });
+      Q.gKeys[0].textContent = glyph(p, 'molotov');
+      Q.gKeys[1].textContent = glyph(p, 'flare');
+      this.el.classList.toggle('kind-touch', inputKind(p) === 'touch');
+    }
+    if (p.input?.touch) p.input.touch.setPrompt(p.prompt && !p.dead);
+
     // Momentum + call-ins
     const m = g.momentum;
     this.set('mom', Q.momFill, 'width', `${m.value}%`);
@@ -187,6 +202,7 @@ export class HUD {
     const gap = 6 + spread * 600;
     Q.cross.style.setProperty('--gap', `${gap.toFixed(1)}px`);
     const optic = w.att && w.att.optic && p.ads > 0.7 && !p.gadget;
+    Q.cross.classList.toggle('on-target', !!(p.assist && p.assist.angle < p.assist.radius + 0.02));
     this.set('crossop', Q.cross, 'opacity', p.ads > 0.6 || p.sprinting || p.dead || p.driving ? '0' : '1');
     this.set('ret', Q.reticle, 'display', optic ? 'block' : 'none');
     Q.hit.style.opacity = p.hitmarker > 0 ? String(Math.min(1, p.hitmarker * 6)) : '0';
@@ -251,7 +267,7 @@ export class HUD {
         // Clamp to screen edge.
         let dx = x - vp.w / 2, dy = y - vp.h / 2;
         if (behind) { dx = -dx; dy = -dy; }
-        const k = Math.min((vp.w / 2 - 40) / Math.abs(dx || 1), (vp.h / 2 - 50) / Math.abs(dy || 1));
+        const k = Math.min((vp.w / 2 - 70) / Math.abs(dx || 1), (vp.h / 2 - 120) / Math.abs(dy || 1));
         x = vp.w / 2 + dx * k; y = vp.h / 2 + dy * k;
       }
       el.style.display = 'block';

@@ -274,6 +274,13 @@ export function animateHumanoid(model, s) {
     p.hips.position.y = 0.45; p.torso.position.y = 0.45; p.torso.rotation.x = -0.6;
     p.legL.rotation.x = -1.6; p.legR.rotation.x = -0.4;
   }
+  if (s.roll) {
+    // Tuck and tumble forward.
+    p.body.position.y = 0.55;
+    p.body.rotation.x = -s.roll * Math.PI * 2;
+    p.legL.rotation.x = -1.6; p.legR.rotation.x = -1.4;
+    p.armL.rotation.set(-1.2, 0, -0.3); p.armR.rotation.set(-1.2, 0, 0.3);
+  }
   if (s.downed || s.dead) {
     const k = s.dead ? Math.min(1, (s.deadT || 0) * 3) : 1;
     p.body.rotation.x = (s.dead ? -1 : 1) * Math.PI / 2 * k * 0.97;

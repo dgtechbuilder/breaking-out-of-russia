@@ -268,14 +268,14 @@ export const border = {
 
     if (this.phase === 0 && this.front < -140) {
       this.phase = 1;
-      g.setObjective({ text: 'Break through to the final barricade', sub: 'Blind snipers with flares [F]. Grab RPG rockets at the cache. Blow the barricade with RPG or Stolen Mortar.', pos: V(0, -318), markerLabel: 'BARRICADE' });
+      g.setObjective({ text: 'Break through to the final barricade', sub: 'Blind snipers with the flare gun. Grab RPG rockets at the cache. Blow the barricade with RPG or Stolen Mortar.', pos: V(0, -318), markerLabel: 'BARRICADE' });
       // Second-line waves
       this.spawnGroup(g, [['rifleman', -8, -205], ['rifleman', 10, -200], ['gunner', -2, -274], ['rifleman', 8, -262], ['rocketeer', -12, -238], ['officer', 4, -246]], 'alert');
       g.spawnDrone(V(10, -200, 20));
     }
     if (this.phase === 1 && this.front < -260 && !this.warned) {
       this.warned = true;
-      g.popup('The barricade will only fall to explosives — RPG or Stolen Mortar [B]', null, 'info');
+      g.popup('The barricade will only fall to explosives — RPG or Stolen Mortar', null, 'info');
     }
     // Squad passing through the hole in the barricade without blowing it (should not happen) — safety.
     if (this.phase < 2 && this.front < -322) this.onBarricade(g);

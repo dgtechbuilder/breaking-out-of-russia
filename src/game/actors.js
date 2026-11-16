@@ -33,8 +33,11 @@ export class Actor {
 
   get alive() { return !this.dead; }
   get up() { return !this.dead && !this.downed; }
-  get standH() { return this.downed ? 0.55 : (this.crouch || this.sliding > 0) ? 1.2 : 1.82; }
-  get eyeH() { return this.downed ? 0.45 : (this.crouch || this.sliding > 0) ? 1.05 : 1.62; }
+  get rolling() { return this.rollT > 0; }
+  /** Invulnerable to gunfire during the first part of a roll. */
+  get dodging() { return this.rollT > 0.18; }
+  get standH() { return this.downed ? 0.55 : this.rollT > 0 ? 0.95 : (this.crouch || this.sliding > 0) ? 1.2 : 1.82; }
+  get eyeH() { return this.downed ? 0.45 : this.rollT > 0 ? 0.8 : (this.crouch || this.sliding > 0) ? 1.05 : 1.62; }
 
   chest(out = new THREE.Vector3()) { return out.set(this.pos.x, this.pos.y + (this.downed ? 0.3 : this.standH * 0.68), this.pos.z); }
   eye(out = new THREE.Vector3()) { return out.set(this.pos.x, this.pos.y + this.eyeH, this.pos.z); }
@@ -254,7 +257,8 @@ export class Soldier extends Actor {
     const g = this.game;
     let p = this.accuracy;
     p *= clamp(1.15 - dist / (this.weaponType === 'svd' ? 260 : 75), 0.15, 1.1);
-    if (t.sliding > 0) p *= 0.4;
+    if (t.rollT > 0) p *= 0.12;
+    else if (t.sliding > 0) p *= 0.4;
     else if (t.speed2D && t.speed2D() > 6.5) p *= 0.65;
     else if (t.speed2D && t.speed2D() > 2) p *= 0.85;
     if (t.crouch) p *= 0.8;

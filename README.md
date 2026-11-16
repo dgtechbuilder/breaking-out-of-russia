@@ -21,7 +21,15 @@ works — ES modules just need to be served over HTTP, not opened as `file://`.)
 ## Features
 
 - **Snappy gunplay** — hitscan rifles with recoil, bloom and headshots; enemies drop in 3–4 rifle hits.
-- **Fluid movement** — sprint, slide (`C` while sprinting), slide-jump, crouch.
+- **Easy aiming on the move** — small accuracy penalty for moving, plus aim assist (slow-down over
+  targets, tracking while you strafe, bullet magnetism, aim-snap on controller/touch). Auto by
+  device: light on mouse, strong on controller and touch; adjustable in Settings.
+- **Fluid movement** — sprint, slide (`C` while sprinting), slide-jump, crouch, and a **dodge roll**
+  (`Alt` or double-tap a direction; `B`/`○` on a controller) that makes you briefly immune to gunfire.
+- **Plays anywhere** — keyboard & mouse, controllers (Xbox, PlayStation, Switch Pro — with matching
+  button icons, rumble and full menu navigation), and **phones/tablets** with on-screen touch
+  controls: floating joystick, drag-to-look (also from the FIRE button), auto-fire, lighter graphics
+  and Recruit difficulty by default.
 - **Squad of four** — AI brothers follow you, flank, fight, scavenge weapons off the dead and
   **revive downed squadmates**. Get downed yourself and you can still fight with your pistol
   while you bleed out.
@@ -59,7 +67,8 @@ Recruit, Veteran and Hardened.
 | Move / Look | WASD / Mouse | Left / Right stick |
 | Fire / Aim | LMB / RMB | RT / LT |
 | Sprint | Shift | L3 (toggle) |
-| Slide / Crouch | C (tap while sprinting / hold) | B |
+| Roll | Alt / double-tap W A S D | B · ○ while moving |
+| Slide / Crouch | C (tap while sprinting / hold) | B · ○ while sprinting / hold |
 | Jump | Space | A |
 | Reload | R | X (tap) |
 | Interact / Revive | E (hold to revive) | X (hold) |
@@ -69,13 +78,18 @@ Recruit, Veteran and Hardened.
 | Call-ins | Z / X / B | D-left / D-up / D-right |
 | Pause | Esc / P | Start |
 
+On touch screens: left thumb moves (push to the top edge to sprint), drag the right side to look,
+and use the FIRE / AIM / JUMP / CROUCH / ROLL / RELOAD / SWAP / MELEE / USE buttons; tap the call-in
+icons under the minimap. Turn the phone sideways.
+
 ## Code layout
 
 ```
 index.html            menus, HUD styles, import map
 src/main.js           boot, menus, co-op lobby, main loop
-src/core/             input, procedural audio, particles/FX, collision + A* nav, procedural models
-src/game/             game orchestrator, player, AI allies/enemies, drones/vehicles/projectiles,
+src/core/             input (keyboard/mouse, gamepad, touch), button glyphs, procedural audio,
+                      particles/FX, collision + A* nav, procedural models
+src/game/             game orchestrator, player, aim assist, AI allies/enemies, drones/vehicles/projectiles,
                       weapons, momentum + call-ins, HUD, workbench
 src/stages/           camp.js, convoy.js, border.js (+ shared builders in common.js)
 vendor/               three.js r170 (MIT)

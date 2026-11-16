@@ -179,7 +179,7 @@ export const camp = {
     g.spawnPoints = [V(-1.4, 7.6), V(1.4, 7.6), V(-4.4, 6), V(4.4, 6)];
     w.buildNav(-34, 66, -84, 16, 1);
     this.phase = 0;
-    g.setObjective({ text: 'Break out of the barracks', sub: 'Sneak up behind the guards — [V] or [Click] with the shovel for a silent takedown', pos: V(0, -5.5), markerLabel: 'EXIT' });
+    g.setObjective({ text: 'Break out of the barracks', sub: 'Sneak up behind the guards and hit them with the shovel for a silent takedown', pos: V(0, -5.5), markerLabel: 'EXIT' });
     g.reinf.interval = 48;
     g.reinf.spawn = (game) => {
       const troops = ['rifleman', 'rifleman', 'gunner', 'officer'];
