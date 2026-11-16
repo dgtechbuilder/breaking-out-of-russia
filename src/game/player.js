@@ -198,11 +198,13 @@ export class Player extends Actor {
       this.rumble(0.25, 0.4, 120);
     }
     this.noSprintT = Math.max(0, this.noSprintT - dt);
-    this.sprinting = it.sprint && mz > 0.3 && !this.downed && this.ads < 0.3 && this.noSprintT <= 0 && !this.crouch;
-    if (this.sprinting && this.reloadT > 0 && w.def.slot !== 1) this.sprinting = it.sprint && mz > 0.3;
-    let speed = this.sprinting ? 8.3 : 5.4;
+    // Run and gun: firing no longer breaks a sprint; aiming down sights does (you slow to aim).
+    this.sprinting = it.sprint && mz > 0.3 && !this.downed && !it.ads && !this.crouch;
+    this.shotAgo = (this.shotAgo ?? 9) + dt;
+    const firing = this.shotAgo < 0.3;
+    let speed = this.sprinting ? (firing ? 7.6 : 8.3) : 5.6;
     if (this.crouch) speed = 2.9;
-    speed *= lerp(1, 0.72, this.ads) * (w.def.moveMult || 1);
+    speed *= lerp(1, 0.85, this.ads) * (w.def.moveMult || 1);
     if (this.downed) speed = 0.9;
 
     if (this.rollT > 0) {
@@ -269,7 +271,7 @@ export class Player extends Actor {
     if (this.gadget) { this.gadget.t -= dt; if (this.gadget.t <= 0) { this.gadget = null; this.rebuildViewmodel(); } }
 
     const canUse = !this.downed || this.cur === 1;
-    const wantAds = it.ads && canUse && !w.def.melee && this.switchT <= 0 && !this.gadget && !this.sprinting && this.rollT <= 0;
+    const wantAds = it.ads && canUse && !w.def.melee && this.switchT <= 0 && !this.gadget && this.rollT <= 0;
     this.ads = damp(this.ads, wantAds ? 1 : 0, 16, dt);
 
     // Reload
@@ -350,6 +352,7 @@ export class Player extends Actor {
     let spread = lerp(w.spreadHip * 0.85 + moving + this.bloom, w.spreadAds + this.bloom * 0.3, this.ads);
     if (!this.onGround) spread += 0.03;
     if (this.sliding > 0) spread += 0.01;
+    if (this.sprinting) spread += 0.012 * (1 - this.ads);
     if (this.downed) spread += 0.02;
     const origin = this.camera.getWorldPosition(new THREE.Vector3());
     const dir = this.camera.getWorldDirection(new THREE.Vector3());
@@ -369,7 +372,7 @@ export class Player extends Actor {
     this.bloom = Math.min(0.045, this.bloom + (w.def.auto ? 0.004 : 0.01));
     this.kick = 1;
     this.flashT = w.suppressed ? 0 : 0.045;
-    this.noSprintT = 0.35;
+    this.shotAgo = 0;
     if (w.def.projectile) this.shake = Math.max(this.shake, 0.35);
   }
 
@@ -440,7 +443,7 @@ export class Player extends Actor {
     const it = this.intent;
     this.swayX = damp(this.swayX, clamp(-it.lookX * 1.5, -0.06, 0.06), 10, dt);
     this.swayY = damp(this.swayY, clamp(it.lookY * 1.5, -0.06, 0.06), 10, dt);
-    this.sprintAmt = damp(this.sprintAmt, this.sprinting && this.reloadT <= 0 ? 1 : 0, 10, dt);
+    this.sprintAmt = damp(this.sprintAmt, this.sprinting && this.reloadT <= 0 && this.shotAgo > 0.4 && !this.intent.fire ? 1 : 0, 14, dt);
     const type = this.vmType;
     const sh2 = sightHeight(type, (this.gadget ? {} : w.att));
     const ads = this.gadget ? 0 : this.ads;

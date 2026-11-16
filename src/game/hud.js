@@ -203,7 +203,7 @@ export class HUD {
     Q.cross.style.setProperty('--gap', `${gap.toFixed(1)}px`);
     const optic = w.att && w.att.optic && p.ads > 0.7 && !p.gadget;
     Q.cross.classList.toggle('on-target', !!(p.assist && p.assist.angle < p.assist.radius + 0.02));
-    this.set('crossop', Q.cross, 'opacity', p.ads > 0.6 || p.sprinting || p.dead || p.driving ? '0' : '1');
+    this.set('crossop', Q.cross, 'opacity', p.ads > 0.6 || (p.sprinting && p.shotAgo > 0.4) || p.dead || p.driving ? '0' : '1');
     this.set('ret', Q.reticle, 'display', optic ? 'block' : 'none');
     Q.hit.style.opacity = p.hitmarker > 0 ? String(Math.min(1, p.hitmarker * 6)) : '0';
     Q.hit.classList.toggle('kill', p.hitKill);
