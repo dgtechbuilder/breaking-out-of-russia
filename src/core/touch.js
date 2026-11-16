@@ -89,7 +89,8 @@ export class TouchInput {
         this.held.add(id);
         this.pressed.add(id);
         b.classList.add('down');
-        if (id === 'fire') this.looks.set(t.identifier, { x: t.clientX, y: t.clientY });
+        // Every action button doubles as a look pad: press it and slide your thumb to turn.
+        if (id !== 'pause') this.looks.set(t.identifier, { x: t.clientX, y: t.clientY });
         continue;
       }
       if (!this.move && t.clientX < window.innerWidth * 0.42) {

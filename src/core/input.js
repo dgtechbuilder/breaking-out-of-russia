@@ -80,7 +80,7 @@ export class KeyboardMouse {
     window.addEventListener('keyup', (e) => { if (e.code.startsWith('Alt')) e.preventDefault(); this.down.delete(e.code); });
     window.addEventListener('blur', () => { this.down.clear(); this.mouse = [false, false, false]; });
     window.addEventListener('mousemove', (e) => {
-      if (this.locked || (this.dragLook && (this.mouse[0] || this.mouse[2]))) {
+      if (this.locked || this.dragLook) {
         this.mdx += e.movementX || 0; this.mdy += e.movementY || 0;
         // Browsers send synthetic zero-movement events; only real movement counts as activity.
         if (Math.abs(e.movementX || 0) + Math.abs(e.movementY || 0) > 1) this.lastActive = performance.now();
@@ -196,7 +196,7 @@ export class GamepadInput {
     // Response curve + a little acceleration when the stick is held at full tilt.
     const mag = Math.hypot(lx, ly);
     this.lookVel = mag > 0.95 ? Math.min(1, this.lookVel + dt * 1.6) : Math.max(0, this.lookVel - dt * 4);
-    const speed = 3.0 * settings.padSensitivity * (b[6] ? 0.5 : 1) * (1 + this.lookVel * 0.6);
+    const speed = 3.0 * settings.padSensitivity * (b[6] ? 0.7 : 1) * (1 + this.lookVel * 0.6);
     intent.lookX = Math.sign(lx) * Math.pow(Math.abs(lx), 1.8) * speed * dt;
     intent.lookY = Math.sign(ly) * Math.pow(Math.abs(ly), 1.8) * speed * 0.75 * dt * (settings.invertY ? -1 : 1);
     const moving = Math.hypot(intent.moveX, intent.moveZ) > 0.35;

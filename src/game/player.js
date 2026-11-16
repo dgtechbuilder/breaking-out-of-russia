@@ -149,16 +149,23 @@ export class Player extends Actor {
     if (this.driving) { this.updateDriving(dt); return; }
 
     // ---------------- Look ----------------
+    // The camera is always yours: looking works while running, sliding, rolling, shooting,
+    // reloading, throwing, reviving, downed, with every weapon. Aim assist steps aside the
+    // moment you deliberately turn.
     const w = this.weapon;
-    const zoom = lerp(1, w.adsZoom || 1, this.ads);
+    const zoom = Math.pow(lerp(1, w.adsZoom || 1, this.ads), 0.6); // gentler slow-down when aiming/scoped
     const S = this.downed ? assistStrength(this) * 0.5 : assistStrength(this);
     const a = this.assist;
     const onTarget = a && a.angle < a.radius + 0.06 + 0.04 * this.ads;
-    // Friction: look input slows down while the crosshair is over or near an enemy.
-    const friction = S > 0 && onTarget ? 1 - 0.5 * S * (1 - Math.min(1, a.angle / (a.radius + 0.1))) : 1;
+    const lookRate = Math.hypot(it.lookX, it.lookY) / Math.max(dt, 1e-3); // rad/s the player is asking for
+    if (lookRate > 1.0) this.assistHold = 0.4; // turning on purpose: pause tracking briefly
+    else this.assistHold = Math.max(0, (this.assistHold || 0) - dt);
+    // Friction: small corrections slow down over an enemy; fast turns pass straight through.
+    const intentK = clamp(1 - lookRate / 2.5, 0, 1);
+    const friction = S > 0 && onTarget ? 1 - 0.45 * S * intentK * (1 - Math.min(1, a.angle / (a.radius + 0.1))) : 1;
     this.yaw -= (it.lookX / zoom) * friction;
     this.pitch = clamp(this.pitch - (it.lookY / zoom) * friction, -1.45, 1.45);
-    if (S > 0 && a && !w.def.melee) {
+    if (S > 0 && a && !w.def.melee && this.assistHold <= 0) {
       const engaged = it.fire || it.ads || this.ads > 0.3 || this.autoFireT > 0;
       const moving = Math.hypot(this.vel.x, this.vel.z) > 1.5;
       // Tracking: follow the target while you strafe and shoot so it stays under the crosshair.
@@ -383,11 +390,14 @@ export class Player extends Actor {
 
   updateDead(dt) {
     this.respawnT -= dt;
-    // Spectate a living squadmate.
+    const it = this.intent;
+    // Spectate a living squadmate; look input orbits the camera around them.
     const s = this.game.squad.find((m) => !m.dead && !m.downed && m !== this) || this.game.squad.find((m) => !m.dead && m !== this);
+    this.specYaw = (this.specYaw ?? this.yaw) - it.lookX;
+    this.specPitch = clamp((this.specPitch ?? -0.35) - it.lookY, -1.2, 0.4);
     if (s) {
-      const back = dirFromYawPitch(s.yaw, -0.3, _d);
-      this.camera.position.set(s.pos.x - back.x * 3.2, s.pos.y + 2.6, s.pos.z - back.z * 3.2);
+      const back = dirFromYawPitch(this.specYaw, this.specPitch, _d);
+      this.camera.position.set(s.pos.x - back.x * 3.6, s.pos.y + 1.4 - back.y * 3.6, s.pos.z - back.z * 3.6);
       this.camera.lookAt(s.pos.x, s.pos.y + 1.2, s.pos.z);
     }
     this.body.visible = true;
@@ -396,8 +406,9 @@ export class Player extends Actor {
 
   updateDriving(dt) {
     const it = this.intent;
-    this.yaw -= it.lookX; this.pitch = clamp(this.pitch - it.lookY, -0.6, 0.5);
-    this.yaw = clamp(this.yaw, -1.6, 1.6);
+    // Free look from the cab (over the shoulder to the sides and back through the window).
+    this.yaw -= it.lookX; this.pitch = clamp(this.pitch - it.lookY, -0.9, 0.8);
+    this.yaw = clamp(this.yaw, -2.7, 2.7);
     if (it.interactPressed) this.game.stage.toggleDrive?.(this);
     if (it.callin >= 0) this.game.momentum.activate(it.callin, this);
     if (it.pause) this.game.requestPause();
@@ -510,6 +521,7 @@ export class Player extends Actor {
   }
 
   respawnAt(pos) {
+    this.specYaw = this.specPitch = undefined;
     this.dead = false; this.downed = false;
     this.hp = this.maxHp; this.bleed = 0;
     this.pos.copy(pos); this.vel.set(0, 0, 0);
