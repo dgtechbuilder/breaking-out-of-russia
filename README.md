@@ -15,7 +15,10 @@ border highway toward the Ukrainian line, to surrender.
 npm start
 ```
 
-Then open <http://localhost:8080>. Click the game to capture the mouse. (Any static file server
+Then open <http://localhost:8080>. Before each match the briefing screen asks how you play:
+**PC** (keyboard & mouse or controller, full graphics) or **Mobile** (on-screen touch controls,
+auto-fire, strong aim assist, lighter graphics). It defaults to whichever fits your device and
+remembers your choice; it can also be changed in Settings. Click the game to capture the mouse. (Any static file server
 works — ES modules just need to be served over HTTP, not opened as `file://`.)
 
 ## Features

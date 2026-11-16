@@ -23,7 +23,7 @@ const DEFAULTS = {
   autoFire: 'auto', // auto (on for touch) | on | off
   rumble: true,
   quality: 'auto', // auto | high | low
-  touchControls: 'auto', // auto | on | off
+  playMode: 'auto', // auto (detect) | pc | mobile — chosen on the briefing screen
 };
 
 export const settings = {
@@ -41,7 +41,9 @@ export const settings = {
       localStorage.setItem('bfr_settings', JSON.stringify(o));
     } catch { /* storage unavailable */ }
   },
-  get lowQuality() { return this.quality === 'low' || (this.quality === 'auto' && isTouchDevice()); },
+  /** 'pc' or 'mobile'. Auto picks mobile on touch-first devices. */
+  get mode() { return this.playMode === 'pc' || this.playMode === 'mobile' ? this.playMode : (isTouchDevice() ? 'mobile' : 'pc'); },
+  get lowQuality() { return this.quality === 'low' || (this.quality === 'auto' && this.mode === 'mobile'); },
 };
 
 export class KeyboardMouse {

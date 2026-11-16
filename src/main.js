@@ -105,11 +105,11 @@ function renderSettings() {
   bind('sens', 'sensitivity', (x) => x.toFixed(2));
   bind('padSens', 'padSensitivity', (x) => x.toFixed(2));
   bind('touchSens', 'touchSensitivity', (x) => x.toFixed(2));
-  const seg = (id, key, opts) => segment($('#' + id), opts, settings[key], (v) => { settings[key] = v === 'true' ? true : v === 'false' ? false : v; settings.save(); if (key === 'quality') applyQuality(); if (key === 'touchControls') { touch.enabled = v === 'on' || (v === 'auto' && isTouchDevice()); touch.refresh(); } });
+  const seg = (id, key, opts, cur = settings[key]) => segment($('#' + id), opts, cur, (v) => { settings[key] = v === 'true' ? true : v === 'false' ? false : v; settings.save(); if (key === 'quality' || key === 'playMode') applyMode(); });
   seg('aaSeg', 'aimAssist', [['auto', 'Auto'], ['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']]);
   seg('afSeg', 'autoFire', [['auto', 'Touch only'], ['on', 'On'], ['off', 'Off']]);
   seg('rumbleSeg', 'rumble', [[true, 'On'], [false, 'Off']]);
-  seg('touchSeg', 'touchControls', [['auto', 'Auto'], ['on', 'On'], ['off', 'Off']]);
+  seg('modeSeg', 'playMode', [['pc', 'PC'], ['mobile', 'Mobile']], settings.mode);
   seg('qualSeg', 'quality', [['auto', 'Auto'], ['high', 'High'], ['low', 'Low (mobile)']]);
   bind('fov', 'fov', (x) => `${x}°`);
   bind('vol', 'volume', (x) => `${Math.round(x * 100)}%`);
@@ -223,12 +223,41 @@ window.addEventListener('gamepaddisconnected', (e) => {
 });
 
 // ------------------------------------------------------------------ flow
+// ------------------------------------------------------------------ play mode (PC / Mobile)
+function applyMode() {
+  touch.setEnabled(settings.mode === 'mobile');
+  applyQuality();
+}
+
+function renderModePick() {
+  const mode = settings.mode;
+  document.querySelectorAll('[data-mode]').forEach((b) => {
+    const on = b.dataset.mode === mode;
+    b.classList.toggle('on', on);
+    b.setAttribute('aria-checked', String(on));
+  });
+  const touchDev = isTouchDevice();
+  $('#modeNote').textContent = mode === 'mobile'
+    ? (touchDev ? 'On-screen touch controls, auto-fire and strong aim assist. Turn your phone sideways.' : 'No touch screen detected — the on-screen buttons also work with a mouse: drag the left side to move, the right side to look.')
+    : (touchDev ? 'PC mode needs a keyboard and mouse or a controller.' : 'Keyboard & mouse or a controller, full graphics. Controllers also work in Mobile mode.');
+}
+
+document.querySelectorAll('[data-mode]').forEach((b) => b.addEventListener('click', () => {
+  settings.playMode = b.dataset.mode;
+  settings.save();
+  audio.init();
+  audio.play('click', null, 0.4);
+  applyMode();
+  renderModePick();
+}));
+
 function briefing(id) {
   const s = stageById(id);
   state.stageId = id;
   $('#briefSub').textContent = `Stage ${STAGES.indexOf(s) + 1} · ${s.subtitle}`;
   $('#briefTitle').textContent = s.name;
   $('#briefText').innerHTML = s.intro.map((l, i) => `<p style="animation-delay:${i * 0.35}s">${l}</p>`).join('');
+  renderModePick();
   show('brief');
   setTimeout(() => $('#briefGo').focus(), 50);
 }
@@ -238,6 +267,7 @@ $('#briefGo').addEventListener('click', () => { audio.init(); startStage(state.s
 function startStage(id) {
   if (state.game) { state.game.dispose(); state.game = null; }
   hudRoot.innerHTML = '';
+  applyMode();
   const stage = stageById(id);
   state.game = new Game({
     renderer, hudRoot, stage, difficulty: state.difficulty,
@@ -249,6 +279,7 @@ function startStage(id) {
   show('play');
   if (touch.enabled) {
     // Phones: go full screen in landscape where the browser allows it.
+    if (isTouchDevice())
     document.documentElement.requestFullscreen?.().then(() => screen.orientation?.lock?.('landscape')).catch(() => {});
   } else {
     kbm.requestLock();
@@ -261,7 +292,7 @@ function pause() {
   if (!g || g.over || state.screen !== 'play') return;
   g.paused = true;
   const st = g.stash;
-  $('#pauseStash').innerHTML = `${g.stage.name} · ${DIFFICULTY[state.difficulty].label} · ${fmtTime(g.time)}<br>Squad stash — optics ${st.optic}, drums ${st.drum}, suppressors ${st.suppressor}, fuel ${st.fuel}, flare kits ${st.flarekit}`;
+  $('#pauseStash').innerHTML = `${g.stage.name} · ${DIFFICULTY[state.difficulty].label} · ${settings.mode === 'mobile' ? 'Mobile' : 'PC'} mode · ${fmtTime(g.time)}<br>Squad stash — optics ${st.optic}, drums ${st.drum}, suppressors ${st.suppressor}, fuel ${st.fuel}, flare kits ${st.flarekit}`;
   show('pause');
 }
 
@@ -314,7 +345,7 @@ function endStage(r) {
 // Pointer lock handling
 canvas.addEventListener('click', () => {
   audio.init();
-  if (state.screen === 'play' && !kbm.locked && performance.now() - touch.lastActive > 1500) kbm.requestLock();
+  if (state.screen === 'play' && !kbm.locked && !touch.enabled) kbm.requestLock();
 });
 window.addEventListener('touchstart', () => audio.init(), { passive: true });
 document.addEventListener('pointerlockchange', () => {

@@ -1,7 +1,7 @@
 // On-screen touch controls for phones and tablets.
 // Left thumb: floating joystick (push to the edge to sprint). Right thumb: drag anywhere to look;
 // dragging from the FIRE button also aims, so you can shoot and steer in one motion.
-import { settings, isTouchDevice } from './input.js';
+import { settings } from './input.js';
 
 const BTNS = [
   { id: 'fire', label: 'FIRE', cls: 'big' },
@@ -21,7 +21,7 @@ const BTNS = [
 export class TouchInput {
   constructor() {
     this.kind = 'touch';
-    this.enabled = settings.touchControls === 'on' || (settings.touchControls === 'auto' && isTouchDevice());
+    this.enabled = settings.mode === 'mobile';
     this.lastActive = 0;
     this.visible = false;
     this.move = null; // {id, ox, oy, x, y}
@@ -48,18 +48,20 @@ export class TouchInput {
     this.knob = el.querySelector('.knob');
     this.btnEls = Object.fromEntries([...el.querySelectorAll('[data-btn]')].map((b) => [b.dataset.btn, b]));
 
-    const opt = { passive: false };
-    el.addEventListener('touchstart', (e) => this.onStart(e), opt);
-    el.addEventListener('touchmove', (e) => this.onMove(e), opt);
-    el.addEventListener('touchend', (e) => this.onEnd(e), opt);
-    el.addEventListener('touchcancel', (e) => this.onEnd(e), opt);
-    // Any touch on the page turns touch controls on (auto mode).
-    window.addEventListener('touchstart', () => {
-      if (settings.touchControls !== 'off' && !this.enabled) { this.enabled = true; this.refresh(); }
-    }, { passive: true });
+    // Pointer events: works with fingers, and with a mouse when Mobile mode is picked on a PC.
+    const wrap = (e) => ({ changedTouches: [{ identifier: e.pointerId, clientX: e.clientX, clientY: e.clientY, target: e.target }], preventDefault: () => e.preventDefault() });
+    el.addEventListener('pointerdown', (e) => {
+      try { el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      this.onStart(wrap(e));
+    });
+    el.addEventListener('pointermove', (e) => { if (e.buttons || e.pointerType === 'touch') this.onMove(wrap(e)); });
+    el.addEventListener('pointerup', (e) => this.onEnd(wrap(e)));
+    el.addEventListener('pointercancel', (e) => this.onEnd(wrap(e)));
+    el.addEventListener('contextmenu', (e) => e.preventDefault());
     this.refresh();
   }
 
+  setEnabled(v) { this.enabled = v; if (!v) this.reset(); this.refresh(); }
   setVisible(v) { this.visible = v; this.refresh(); if (!v) this.reset(); }
   refresh() {
     const on = this.enabled && this.visible;
