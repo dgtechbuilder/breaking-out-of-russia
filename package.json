@@ -1,0 +1,11 @@
+{
+  "name": "breakout-from-russia",
+  "version": "1.0.0",
+  "description": "Breakout from Russia: a fast co-op arcade FPS that runs in the browser.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "license": "UNLICENSED"
+}
