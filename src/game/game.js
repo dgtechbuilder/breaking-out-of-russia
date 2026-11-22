@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { World } from '../core/world.js';
 import { FX } from '../core/fx.js';
+import { Sky } from '../core/sky.js';
 import { audio } from '../core/audio.js';
 import { settings } from '../core/input.js';
 import { mat, makeGun } from '../core/models.js';
@@ -59,7 +60,10 @@ export class Game {
     this.truckHpText = '';
 
     this.setupScene();
+    this.world.shadows = !settings.lowQuality;
+    this.world.beginBatch();
     stage.build(this);
+    this.world.flushBatch();
     this.indoor = this.world.indoor;
     this.spawnSquad(inputs);
     this.setupGuide();
@@ -74,6 +78,8 @@ export class Game {
     this.scene.fog = new THREE.Fog(env.fog ?? env.sky, env.fogNear ?? 30, env.fogFar ?? 220);
     this.hemi = new THREE.HemisphereLight(env.skyLight, env.groundLight, env.hemi ?? 1.2);
     this.scene.add(this.hemi);
+    this.hemiBase = env.hemi ?? 1.2;
+    this.sky = new Sky(this.scene, env, { low: settings.lowQuality });
     const sun = new THREE.DirectionalLight(env.sunColor, env.sun ?? 1.8);
     sun.position.set(env.sunDir[0] * 60, env.sunDir[1] * 60, env.sunDir[2] * 60);
     sun.castShadow = !settings.lowQuality;
@@ -136,7 +142,7 @@ export class Game {
         this.squad.push(p);
       } else {
         const look = PLAYER_LOOKS[i];
-        const a = new Ally(this, look.name, { skin: look.skin, top: look.top, pants: look.pants, hat: look.hat, hatColor: look.hatColor, band: look.band, band2: look.band }, i - n);
+        const a = new Ally(this, look.name, { skin: look.skin, top: look.top, pants: look.pants, hat: look.hat, hatColor: look.hatColor, band: look.band, band2: look.band, face: 'smile' }, i - n);
         a.pos.set(sp.x, sp.y || 0, sp.z);
         a.yaw = this.stage.spawnYaw ?? 0;
         if (this.stage.allyWeapon) a.setWeapon(typeof this.stage.allyWeapon === 'function' ? this.stage.allyWeapon(i) : this.stage.allyWeapon);
@@ -865,8 +871,12 @@ export class Game {
     this.fx.update(dt);
     this.updateGuide(dt);
     this.updateSnow(dt);
+    for (const f of this.world.anims) f(dt, this.time);
     // Shadow camera follows player 1.
     const lead = this.players[0];
+    const boost = this.sky.update(dt, lead.pos, (v) => audio.play('distant', null, v));
+    this.hemi.intensity = this.hemiBase + boost * (this.stage.env.flashBoost ?? 0.25);
+    this.updateDroneHum();
     this.sun.position.copy(lead.pos).add(this.sunOffset);
     this.sun.target.position.copy(lead.pos);
     audio.setListener(lead.camera.position, lead.yaw);
@@ -950,6 +960,17 @@ export class Game {
     } else this.failT = 0;
   }
 
+  updateDroneHum() {
+    let best = 0;
+    const l = audio.listener;
+    for (const d of this.drones) {
+      if (d.dead) continue;
+      const k = 1 - Math.hypot(d.pos.x - l.x, d.pos.y - l.y, d.pos.z - l.z) / 70;
+      if (k > best) best = k;
+    }
+    audio.setHum(best > 0 ? best * best : 0);
+  }
+
   updateSnow(dt) {
     if (!this.snow) return;
     const c = this.players[0].pos;
@@ -973,6 +994,7 @@ export class Game {
     if (this.over) return;
     this.over = true;
     audio.stopEngine();
+    audio.setHum(0);
     setTimeout(() => this.onEnd?.({ win: true, text, stats: this.collectStats() }), 600);
   }
 
@@ -980,6 +1002,7 @@ export class Game {
     if (this.over) return;
     this.over = true;
     audio.stopEngine();
+    audio.setHum(0);
     this.onEnd?.({ win: false, text: reason, stats: this.collectStats() });
   }
 
@@ -1008,6 +1031,7 @@ export class Game {
       r.setViewport(v.x, H - v.y - v.h, v.w, v.h);
       r.setScissor(v.x, H - v.y - v.h, v.w, v.h);
       this.fx.setScale(v.h, p.camera.fov);
+      this.sky.follow(p.camera.position);
       r.render(this.scene, p.camera);
       if (!p.dead && !p.driving) {
         r.clearDepth();
@@ -1018,6 +1042,7 @@ export class Game {
 
   dispose() {
     audio.stopEngine();
+    audio.setHum(0);
     for (const p of this.players) { p.hud.destroy(); }
     this.scene.traverse((o) => {
       if (o.geometry && !o.geometry.parameters) o.geometry.dispose?.();

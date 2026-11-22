@@ -1,7 +1,7 @@
 // Stage 3 — The Border Dash: push down a cratered highway through waves, snipers and
 // fortified roadblocks to reach the Ukrainian line and surrender.
 import * as THREE from 'three';
-import { M, wall, crate, sandbags, barrel, tree, wreckCar, crater, tankTrap, concreteBlock, building } from './common.js';
+import { M, wall, crate, sandbags, barrel, tree, wreckCar, crater, tankTrap, concreteBlock, building, jersey, hesco, container, ruinHouse, busWreck, fireBarrel, powerLine, waveFlag } from './common.js';
 import { mat, box, makeTruck, makeFlag, makeHumanoid, animateHumanoid } from '../core/models.js';
 import { Weapon } from '../game/weapons.js';
 import { audio } from '../core/audio.js';
@@ -23,6 +23,7 @@ export const border = {
     sky: 0xaeb6bd, fog: 0xaeb6bd, fogNear: 40, fogFar: 260,
     skyLight: 0xe4ecf4, groundLight: 0x6a6e72, hemi: 1.15,
     sunColor: 0xfff2e0, sun: 1.25, sunDir: [0.5, 0.75, 0.35], ground: 0xc9cfd4, snow: true,
+    skyTop: 0x7a8898, clouds: 28, cloudColor: 0xdfe4e8, cloudOpacity: 0.9, cloudWind: [3.5, -1.5], flashBoost: 0.18,
   },
   mapColor: 'rgba(170,176,182,0.85)',
   spawnYaw: 0,
@@ -151,11 +152,13 @@ export const border = {
     wall(w, -36, -422, 36, -422, 1.4, 0.6, M.woodDark());
     const flagU = makeFlag([0x0057b7, 0xffd700]);
     flagU.position.set(-5, 0, -417); S.add(flagU);
+    waveFlag(w, flagU);
     const flagW = makeFlag([0xffffff, 0xffffff]);
     flagW.position.set(5, 0, -417); S.add(flagW);
+    waveFlag(w, flagW);
     this.friendlies = [];
     for (const x of [-10, -6, 7, 12]) {
-      const m = makeHumanoid({ skin: pick([0xe0bfa3, 0xc9a184, 0xd9b49a]), top: 0x56613d, pants: 0x4a5236, hat: 'helmet', hatColor: 0x56613d, vest: 0x3f4a2e });
+      const m = makeHumanoid({ skin: pick([0xe0bfa3, 0xc9a184, 0xd9b49a]), top: 0x56613d, pants: 0x4a5236, hat: 'helmet', hatColor: 0x56613d, vest: 0x3f4a2e, face: 'smile' });
       m.position.set(x, 0, -417.5);
       S.add(m);
       this.friendlies.push(m);
@@ -167,6 +170,34 @@ export const border = {
       enabled: () => this.phase >= 2,
       action: (p) => this.surrender(g, p),
     });
+
+    // ---------- Extra cover & set dressing ----------
+    const CC = container.colors;
+    // Section A
+    container(w, 18, -40, false, CC[0]);
+    container(w, -20, -60, true, CC[1]);
+    container(w, 22, -104, false, CC[2]); container(w, 22, -104, false, CC[3], 2.6);
+    busWreck(w, 12, -30);
+    ruinHouse(w, -22, -30, 7, 6); ruinHouse(w, 20, -70, 7, 6); ruinHouse(w, -24, -118, 8, 6);
+    jersey(w, 5, -20, 3); jersey(w, -6, -52, 3); jersey(w, 10, -58, 3, false); jersey(w, -2, -76, 3);
+    jersey(w, 16, -96, 3); jersey(w, -12, -132, 3); jersey(w, 2, -138, 3);
+    hesco(w, -26, -80, 3, false); hesco(w, 26, -128, 3);
+    // Section B
+    container(w, -20, -185, false, CC[4]);
+    container(w, 20, -215, true, CC[0]); container(w, 20, -215, true, CC[2], 2.6);
+    container(w, -18, -262, true, CC[3]);
+    ruinHouse(w, 18, -180, 7, 6); ruinHouse(w, -22, -225, 7, 7); ruinHouse(w, 16, -282, 8, 6);
+    jersey(w, -4, -170, 3); jersey(w, 14, -232, 3, false); jersey(w, -8, -250, 3); jersey(w, 6, -212, 3); jersey(w, 12, -292, 3);
+    hesco(w, -26, -200, 3, false); hesco(w, 24, -262, 3, false);
+    busWreck(w, -16, -298, true);
+    // No-man's land: scraps of cover for the final sprint
+    hesco(w, -14, -360, 3); hesco(w, 14, -372, 3); jersey(w, 0, -350, 3); jersey(w, -6, -388, 3);
+    container(w, -22, -385, true, CC[4]);
+    // Power lines along both verges
+    powerLine(w, 9.5, 10, -300); powerLine(w, -9.5, 10, -300);
+    // Burning wrecks: flames + smoke columns
+    for (const [x, z] of [[-6, -30], [14.2, -36], [19.2, -108], [2.8, -185.5], [-1, -222.5], [11.5, -264.5]]) fireBarrel(w, x, z);
+    this.smokeSrc.push(V(-4, -28, 1.6), V(7, -66, 1.6), V(-9, -100, 1.6), V(12, -30, 2.6), V(5, -182, 1.6), V(-3, -220, 1.6), V(9, -262, 1.6), V(-16, -298, 2.6));
 
     // Spawns & nav
     g.spawnPoints = [V(-1.5, 2), V(1.5, 2), V(-3.5, 4), V(3.5, 4)];
@@ -261,7 +292,10 @@ export const border = {
   update(g, dt) {
     const alive = g.players.filter((p) => !p.dead);
     this.front = Math.min(...alive.map((p) => p.pos.z), 0);
-    if (Math.random() < dt * 3) g.fx.smoke(this.smokeSrc[0], [0.15, 0.15, 0.15], 1.6);
+    const lead = g.players[0].pos;
+    for (const src of this.smokeSrc) {
+      if (Math.abs(src.z - lead.z) < 140 && Math.random() < dt * 2.4) g.fx.smoke(src, [0.15, 0.15, 0.15], 1.6);
+    }
     for (const m of g.worldMarkers) if (m.hideWhen && m.hideWhen() && !m.gone) { m.gone = true; g.worldMarkers.splice(g.worldMarkers.indexOf(m), 1); }
     // Friendlies idle animation
     for (const m of this.friendlies) animateHumanoid(m, { move: 0, t: g.time, aiming: false });

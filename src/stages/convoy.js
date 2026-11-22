@@ -2,13 +2,14 @@
 // The world scrolls past the truck (the truck stays near the origin), which keeps physics simple.
 import * as THREE from 'three';
 import { M, sandbags } from './common.js';
-import { mat, box, cyl, makeTruck, makeTree } from '../core/models.js';
+import { mat, box, cyl, makeTruck, makeTree, mergeGroup } from '../core/models.js';
 import { Weapon } from '../game/weapons.js';
 import { Technical } from '../game/entities.js';
 import { audio } from '../core/audio.js';
 import { rand, pick, clamp, damp, chance } from '../core/util.js';
 
 const V = (x, z, y = 0) => new THREE.Vector3(x, y, z);
+const _cs = new THREE.Vector3();
 const BED_Y = 1.22;
 const GOAL = 3300;
 const SLOTS = [[-0.7, 3.6], [0.7, 3.6], [-0.7, 1.5], [0.7, 1.5]];
@@ -27,6 +28,7 @@ export const convoy = {
     sky: 0x9a8a88, fog: 0x9a8a88, fogNear: 50, fogFar: 300,
     skyLight: 0xffd2b0, groundLight: 0x4a4a55, hemi: 1.0,
     sunColor: 0xffb070, sun: 1.7, sunDir: [-0.45, 0.32, -0.85], ground: 0xd7dbe0, snow: true,
+    skyTop: 0x4d5c84, sunGlow: 0xffa868, clouds: 24, cloudColor: 0xf2c4ac, cloudOpacity: 0.85, cloudWind: [0.6, 2], flashBoost: 0.15,
   },
   mapColor: 'rgba(200,205,210,0.6)',
   scrolling: true,
@@ -72,25 +74,90 @@ export const convoy = {
     w.addBox(-8.5, 0, -600, 2.5, 0.5, 2000, M.snow(), { collide: false });
     w.addBox(8.5, 0, -600, 2.5, 0.5, 2000, M.snow(), { collide: false });
     g.mapFeatures.push({ x: 0, z: -600, w: 14, d: 2000, color: 'rgba(50,52,56,0.95)' });
-    // Scrolling dashes, poles and trees
-    for (let i = 0; i < 50; i++) this.addScenery(box(0.18, 0.02, 3, lineM, 0, 0.015, 0), 0, -i * 12 + 60, 600);
+    // Scrolling dashes, poles, trees and roadside clutter. Repeating pieces are merged into
+    // long strips so the whole roadside costs a few dozen draw calls.
+    for (let k = 0; k < 5; k++) {
+      const strip = new THREE.Group();
+      for (let i = 0; i < 10; i++) box(0.18, 0.02, 3, lineM, 0, 0.015, -i * 12, strip);
+      this.addScenery(mergeGroup(strip), 0, -k * 120 + 60, 600, false, 70 + 108);
+    }
     for (let i = 0; i < 16; i++) {
       const pole = new THREE.Group();
       cyl(0.1, 0.12, 7, M.woodDark(), 6, 0, 3.5, 0, pole);
       box(1.6, 0.1, 0.1, M.woodDark(), 0, 6.6, 0, pole);
-      this.addScenery(pole, i % 2 ? 9.6 : -9.6, -i * 40 + 60, 640);
+      this.addScenery(mergeGroup(pole), i % 2 ? 9.6 : -9.6, -i * 40 + 60, 640);
     }
-    for (let i = 0; i < 90; i++) {
-      const side = i % 2 ? 1 : -1;
-      const t = makeTree(rand(1.1, 2.2), true);
-      t.rotation.y = rand(0, 6);
-      this.addScenery(t, side * rand(12, 70), -i * 7 + 60, 630, true);
+    for (let k = 0; k < 6; k++) {
+      const strip = new THREE.Group();
+      for (let i = 0; i < 15; i++) {
+        const side = i % 2 ? 1 : -1;
+        const t = makeTree(rand(1.1, 2.2), true);
+        t.rotation.y = rand(0, 6);
+        t.position.set(side * rand(12, 70), 0, -i * 7);
+        strip.add(t);
+      }
+      this.addScenery(mergeGroup(strip), 0, -k * 105 + 60, 630, true, 70 + 105);
     }
+    this.chimneys = [];
     for (let i = 0; i < 6; i++) {
       const hut = new THREE.Group();
       box(6, 3, 5, i % 2 ? M.brick() : M.wood(), 0, 1.5, 0, hut);
       const roof = box(6.6, 0.3, 5.6, M.roof(), 0, 3.4, 0, hut); roof.rotation.z = 0.2;
-      this.addScenery(hut, (i % 2 ? 1 : -1) * rand(22, 40), -i * 105 + 20, 630, true);
+      box(0.6, 1.6, 0.6, M.brick(), 1.6, 3.8, 1, hut); // chimney
+      box(1.2, 1.4, 0.06, mat(0xffc870, { emissive: 0xffb050, ei: 1.2 }), -1.4, 1.6, -2.52, hut); // lit window
+      box(1.0, 2.0, 0.06, M.woodDark(), 1.6, 1.0, -2.52, hut); // door
+      const m = mergeGroup(hut);
+      this.addScenery(m, (i % 2 ? 1 : -1) * rand(22, 40), -i * 105 + 20, 630, true);
+      this.chimneys.push(m);
+    }
+    // Wrecks, barriers, billboards and a knocked-out tank on the verges.
+    const verge = (i) => (i % 2 ? 1 : -1);
+    for (let i = 0; i < 6; i++) {
+      const w2 = new THREE.Group();
+      const m = mat(pick([0x2a2624, 0x3a3530, 0x4a3a2e]), { rough: 0.9, edge: 0.6 });
+      box(1.9, 0.8, 4.2, m, 0, 0.6, 0, w2);
+      box(1.7, 0.6, 2.0, m, 0, 1.3, 0.2, w2);
+      box(1.72, 0.42, 0.06, mat(0x141414), 0, 1.3, -0.82, w2);
+      for (const [ox, oz] of [[-0.9, -1.3], [0.9, -1.3], [-0.9, 1.3], [0.9, 1.3]]) { const wh = cyl(0.35, 0.35, 0.25, mat(0x111111), 8, ox, 0.3, oz, w2); wh.rotation.z = Math.PI / 2; }
+      w2.rotation.set(0, rand(-0.8, 0.8), verge(i) * rand(0.05, 0.25));
+      this.addScenery(mergeGroup(w2), verge(i) * rand(10.5, 15), -i * 100 - 30, 600, true);
+    }
+    for (let i = 0; i < 10; i++) {
+      const j = new THREE.Group();
+      for (let k = 0; k < 3; k++) {
+        box(1.46, 0.4, 0.78, M.concrete(), k * 1.5, 0.2, 0, j);
+        box(1.46, 0.8, 0.42, M.concrete(), k * 1.5, 0.8, 0, j);
+        box(1.46, 0.06, 0.44, mat(k % 2 ? 0xd8d4c8 : 0xb03a2a, { edge: 0.55 }), k * 1.5, 0.95, 0, j);
+      }
+      j.rotation.y = Math.PI / 2 + rand(-0.2, 0.2);
+      this.addScenery(mergeGroup(j), verge(i + 1) * rand(9.2, 10.5), -i * 61 - 10, 610, true);
+    }
+    for (let i = 0; i < 4; i++) {
+      const b = new THREE.Group();
+      box(0.25, 5, 0.25, M.woodDark(), -2.2, 2.5, 0, b);
+      box(0.25, 5, 0.25, M.woodDark(), 2.2, 2.5, 0, b);
+      box(5.6, 2.6, 0.15, mat(pick([0x2f5a8a, 0xb5642a, 0x8a3a2a, 0x3f6b45]), { edge: 0.8 }), 0, 4.6, 0, b);
+      box(4.6, 0.5, 0.17, mat(0xe8e2d0, { edge: 0.6 }), 0, 4.9, 0, b);
+      box(3.0, 0.3, 0.17, mat(0xe8e2d0, { edge: 0.6 }), -0.6, 4.1, 0, b);
+      b.rotation.y = verge(i) * 0.35;
+      this.addScenery(mergeGroup(b), verge(i) * rand(14, 18), -i * 150 - 80, 600, true);
+    }
+    for (let i = 0; i < 2; i++) {
+      const tk = new THREE.Group();
+      const tm = mat(0x3c4232, { rough: 0.8, edge: 0.7 }), soot = mat(0x1e1c1a, { edge: 0.6 });
+      box(3.4, 1.1, 6.6, tm, 0, 0.95, 0, tk);
+      box(3.6, 0.7, 6.8, soot, 0, 0.35, 0, tk); // tracks
+      const tur = new THREE.Group(); tur.position.set(0, 1.75, 0.4); tur.rotation.set(0.1, rand(-1, 1), 0.15); tk.add(tur);
+      box(2.3, 0.75, 2.6, tm, 0, 0, 0, tur);
+      const gun = cyl(0.1, 0.12, 4.2, soot, 8, 0, 0, -3.2, tur); gun.rotation.x = Math.PI / 2 - 0.15;
+      tk.rotation.set(0, rand(-0.6, 0.6), verge(i) * 0.08);
+      this.addScenery(mergeGroup(tk), verge(i) * rand(16, 24), -i * 300 - 180, 600, true);
+    }
+    for (let i = 0; i < 12; i++) {
+      const post = new THREE.Group();
+      box(0.14, 1.1, 0.14, mat(0xe8e8e0, { edge: 0.6 }), 0, 0.55, 0, post);
+      box(0.15, 0.2, 0.15, mat(0xb03a2a, { edge: 0.6 }), 0, 0.95, 0, post);
+      this.addScenery(mergeGroup(post), verge(i) * 8.2, -i * 50 - 5, 600);
     }
 
     // ---------- Our truck ----------
@@ -131,6 +198,20 @@ export const convoy = {
     tcol(1.34, 1.82, 0.0, 1.5, 4.5, 4.8, { blocksShot: false, vehicle: false });
     tcol(-1.5, 1.82, 4.64, 1.5, 4.5, 4.8, { blocksShot: false, vehicle: false });
     tcol(-1.5, 2.75, -0.1, 1.5, 4.5, 0.2, { blocksShot: false, vehicle: false });
+
+    // Sandbag cover on the tailgate and rear sides: crouch to hide, stand to shoot over.
+    {
+      const bags = new THREE.Group();
+      const sm = M.sandbag();
+      for (let r = 0; r < 3; r++) {
+        for (let i = 0; i < 5; i++) box(0.5, 0.2, 0.32, sm, -1.05 + i * 0.52 + (r % 2 ? 0.1 : 0), 1.92 + r * 0.2, 4.47, bags).rotation.y = rand(-0.08, 0.08);
+        for (const sx of [-1, 1]) for (let i = 0; i < 3; i++) box(0.26, 0.2, 0.52, sm, sx * 1.2, 1.92 + r * 0.2, 2.85 + i * 0.52 + (r % 2 ? 0.1 : 0), bags).rotation.y = rand(-0.08, 0.08);
+      }
+      model.add(mergeGroup(bags));
+      tcol(-1.3, 1.82, 4.31, 1.3, 2.4, 4.64, { material: 'sand', vehicle: false });
+      tcol(-1.34, 1.82, 2.6, -1.06, 2.4, 4.31, { material: 'sand', vehicle: false });
+      tcol(1.06, 1.82, 2.6, 1.34, 2.4, 4.31, { material: 'sand', vehicle: false });
+    }
 
     // Interactables in the bed
     this.driveI = g.addInteractable({
@@ -197,11 +278,11 @@ export const convoy = {
     audio.play('click', null, 0.5);
   },
 
-  addScenery(obj, x, z, span, castShadow = false) {
+  addScenery(obj, x, z, span, castShadow = false, wrapAt = 70) {
     obj.position.set(x, obj.position.y, z);
     obj.traverse((o) => { if (o.isMesh) { o.castShadow = castShadow; o.receiveShadow = true; } });
     this.truckScene().add(obj);
-    this.scenery.push({ obj, span });
+    this.scenery.push({ obj, span, wrapAt });
   },
 
   truckScene() { return this._scene; },
@@ -350,9 +431,14 @@ export const convoy = {
     this.dist += dz;
     for (const s of this.scenery) {
       s.obj.position.z += dz;
-      if (s.obj.position.z > 70) s.obj.position.z -= s.span;
+      if (s.obj.position.z > s.wrapAt) s.obj.position.z -= s.span;
     }
     g.shiftWorld(dz);
+    g.sky.wind.y = 2 + t.speed * 0.85;
+    for (const c of this.chimneys) {
+      const p = c.position;
+      if (p.z < 40 && p.z > -260 && Math.random() < dt * 4) g.fx.smoke(_cs.set(p.x + 1.6, 4.8, p.z + 1), [0.35, 0.33, 0.32], 1.4);
+    }
     for (const b of this.blocks) {
       b.z += dz;
       b.group.position.z = b.z;

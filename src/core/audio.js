@@ -109,6 +109,26 @@ class AudioEngine {
     this.engine.o2.frequency.value = 19 + speed01 * 20;
   }
 
+  /** Drone rotor whine; level 0..1 (0 silences it). */
+  setHum(level) {
+    if (!this.ctx) return;
+    if (!this.hum) {
+      if (level <= 0) return;
+      const c = this.ctx;
+      const o = c.createOscillator(); o.type = 'sawtooth'; o.frequency.value = 176;
+      const o2 = c.createOscillator(); o2.type = 'sawtooth'; o2.frequency.value = 183;
+      const lfo = c.createOscillator(); lfo.frequency.value = 7;
+      const lg = c.createGain(); lg.gain.value = 6;
+      lfo.connect(lg).connect(o.frequency);
+      const f = c.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 900; f.Q.value = 0.8;
+      const g = c.createGain(); g.gain.value = 0;
+      o.connect(f); o2.connect(f); f.connect(g).connect(this.master);
+      o.start(); o2.start(); lfo.start();
+      this.hum = { o, o2, lfo, g };
+    }
+    this.hum.g.gain.setTargetAtTime(level * 0.11, this.ctx.currentTime, 0.15);
+  }
+
   stopEngine() {
     if (!this.engine) return;
     try { this.engine.o.stop(); this.engine.o2.stop(); } catch { /* already stopped */ }
@@ -152,6 +172,9 @@ const SOUNDS = {
   objective: { fn: (a, d) => { [523, 659, 784].forEach((f, i) => a.tone(d, { t: i * 0.11, dur: 0.3, freq: f, vol: 0.25, type: 'square' })); }, range: 1000 },
   click: { fn: (a, d) => a.tone(d, { dur: 0.04, freq: 1200, vol: 0.2, type: 'square' }), range: 1000 },
   mortarWhistle: { fn: (a, d) => a.tone(d, { dur: 1.3, freq: 1800, to: 500, vol: 0.25 }), range: 120 },
+  // Weapon draw: cloth swipe, sling rattle and a solid bolt/slide rack.
+  draw: { fn: (a, d) => { a.noiseBurst(d, { dur: 0.16, freq: 1100, sweepTo: 2400, q: 0.8, vol: 0.55, attack: 0.02 }); a.noiseBurst(d, { t: 0.1, dur: 0.05, freq: 3200, q: 4, vol: 0.85 }); a.noiseBurst(d, { t: 0.2, dur: 0.07, freq: 2200, q: 3, vol: 1.0 }); a.tone(d, { t: 0.2, dur: 0.06, freq: 260, to: 150, vol: 0.35, type: 'square' }); }, range: 20 },
+  distant: { fn: (a, d) => { a.noiseBurst(d, { dur: 2.6, type: 'lowpass', freq: 220, sweepTo: 50, vol: 0.9, attack: 0.04 }); a.tone(d, { dur: 1.6, freq: 48, to: 26, vol: 0.5, attack: 0.03 }); }, range: 1000 },
   truckHit: { fn: (a, d) => { a.noiseBurst(d, { dur: 0.3, type: 'lowpass', freq: 400, vol: 1 }); a.tone(d, { dur: 0.3, freq: 80, to: 40, vol: 0.8 }); }, range: 60 },
 };
 

@@ -10,9 +10,48 @@ export function boxGeo(w, h, d) {
   return g;
 }
 
+/**
+ * Merge [geometry, matrix] pairs into one indexed BufferGeometry (position/normal/uv).
+ * Used to batch static props so a whole level costs a handful of draw calls.
+ */
+const _p = new THREE.Vector3(), _n = new THREE.Vector3(), _nm = new THREE.Matrix3();
+export function bakeGeometry(list) {
+  let nv = 0, ni = 0;
+  for (const [g] of list) { nv += g.attributes.position.count; ni += g.index ? g.index.count : g.attributes.position.count; }
+  const pos = new Float32Array(nv * 3), nor = new Float32Array(nv * 3), uv = new Float32Array(nv * 2);
+  const col = list.some((e) => e[2]) ? new Float32Array(nv * 3) : null;
+  const idx = nv > 65535 ? new Uint32Array(ni) : new Uint16Array(ni);
+  let vo = 0, io = 0;
+  for (const [g, m4, color] of list) {
+    _nm.getNormalMatrix(m4);
+    if (col && color) for (let i = 0; i < g.attributes.position.count; i++) { const k = (vo + i) * 3; col[k] = color.r; col[k + 1] = color.g; col[k + 2] = color.b; }
+    const P = g.attributes.position, N = g.attributes.normal, U = g.attributes.uv, I = g.index;
+    for (let i = 0; i < P.count; i++) {
+      _p.fromBufferAttribute(P, i).applyMatrix4(m4);
+      const k = (vo + i) * 3;
+      pos[k] = _p.x; pos[k + 1] = _p.y; pos[k + 2] = _p.z;
+      if (N) { _n.fromBufferAttribute(N, i).applyMatrix3(_nm).normalize(); nor[k] = _n.x; nor[k + 1] = _n.y; nor[k + 2] = _n.z; } else nor[k + 1] = 1;
+      if (U) { uv[(vo + i) * 2] = U.getX(i); uv[(vo + i) * 2 + 1] = U.getY(i); }
+    }
+    if (I) for (let i = 0; i < I.count; i++) idx[io + i] = I.getX(i) + vo;
+    else for (let i = 0; i < P.count; i++) idx[io + i] = i + vo;
+    vo += P.count; io += I ? I.count : P.count;
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  if (col) geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
+  geo.computeBoundingSphere();
+  return geo;
+}
+
 export class World {
   constructor(scene) {
     this.scene = scene;
+    this.anims = []; // per-frame callbacks (dt, time) for cheap ambient motion
+    this.batch = null; // while building, static meshes collect here and get merged by flushBatch()
     this.colliders = [];
     this.groundY = 0;
     this.nav = null;
@@ -28,12 +67,47 @@ export class World {
       mesh.position.set(x, y + h / 2, z);
       if (opts.rotY) mesh.rotation.y = opts.rotY;
       if (this.shadows) { mesh.castShadow = opts.castShadow ?? (h > 0.3); mesh.receiveShadow = true; }
-      (opts.parent || this.scene).add(mesh);
+      if (opts.parent) opts.parent.add(mesh);
+      else if (opts.hp == null && !opts.group && opts.batch !== false) this.addStatic(mesh);
+      else this.scene.add(mesh);
     }
     if (opts.collide === false) return mesh;
     const c = this.addCollider(x - w / 2, y, z - d / 2, x + w / 2, y + h, z + d / 2, opts);
     c.mesh = mesh;
     return c;
+  }
+
+  /** Add a purely static visual (mesh or group). It is merged with others of the same material. */
+  addStatic(obj) {
+    (this.batch || this.scene).add(obj);
+    return obj;
+  }
+
+  beginBatch() { this.batch = new THREE.Group(); }
+
+  /** Merge everything added via addStatic into one mesh per material per 64 m cell. */
+  flushBatch() {
+    const src = this.batch;
+    this.batch = null;
+    if (!src) return;
+    src.updateMatrixWorld(true);
+    const buckets = new Map();
+    const c = new THREE.Vector3();
+    src.traverse((o) => {
+      if (!o.isMesh || !o.visible || Array.isArray(o.material) || o.isInstancedMesh) return;
+      if (!o.geometry.boundingSphere) o.geometry.computeBoundingSphere();
+      c.copy(o.geometry.boundingSphere.center).applyMatrix4(o.matrixWorld);
+      const key = `${o.material.uuid}|${o.castShadow ? 1 : 0}|${Math.floor(c.x / 64)}|${Math.floor(c.z / 64)}`;
+      let b = buckets.get(key);
+      if (!b) buckets.set(key, b = { material: o.material, cast: o.castShadow, list: [] });
+      b.list.push([o.geometry, o.matrixWorld.clone()]);
+    });
+    for (const b of buckets.values()) {
+      const mesh = new THREE.Mesh(bakeGeometry(b.list), b.material);
+      mesh.castShadow = b.cast && this.shadows; mesh.receiveShadow = true;
+      mesh.matrixAutoUpdate = false;
+      this.scene.add(mesh);
+    }
   }
 
   addCollider(x0, y0, z0, x1, y1, z1, opts = {}) {

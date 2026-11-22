@@ -1,6 +1,6 @@
 // Stage 1 — Camp Lockdown: close-quarters breakout through barracks, armory and gate.
 import * as THREE from 'three';
-import { M, wall, building, crate, crateStack, sandbags, barrel, bunk, workbench, lamp, pointLight, tree, parkedTruck } from './common.js';
+import { M, wall, building, crate, crateStack, sandbags, barrel, bunk, workbench, lamp, pointLight, tree, parkedTruck, jersey, hesco, container, shed, lowWall, fireBarrel, waveFlag } from './common.js';
 import { mat, box, makeTruck, makeFlag } from '../core/models.js';
 import { Weapon } from '../game/weapons.js';
 import { audio } from '../core/audio.js';
@@ -22,6 +22,8 @@ export const camp = {
     sky: 0x0d1424, fog: 0x0d1424, fogNear: 18, fogFar: 140,
     skyLight: 0x6c80b0, groundLight: 0x262628, hemi: 0.75,
     sunColor: 0xa8bcff, sun: 0.75, sunDir: [0.35, 1, 0.45], ground: 0x7d838a, snow: true,
+    skyTop: 0x03060f, stars: true, moon: [-0.45, 0.5, -0.75],
+    clouds: 18, cloudColor: 0x343e58, cloudOpacity: 0.8, cloudWind: [2.2, -0.8], flashBoost: 0.4,
   },
   mapColor: 'rgba(60,66,74,0.88)',
   spawnYaw: 0,
@@ -89,6 +91,7 @@ export const camp = {
     makeTower(g, 24, -26);
     const flag = makeFlag([0xffffff, 0x1c3faa, 0xd52b1e]);
     flag.position.set(-1, 0, -30); S.add(flag);
+    waveFlag(w, flag);
     w.addCollider(-1.1, 0, -30.1, -0.9, 6, -29.9);
 
     // ---------- Armory ----------
@@ -147,6 +150,29 @@ export const camp = {
       enabled: () => !this.gateOpen,
       action: (p) => this.openGate(g, false, p),
     });
+
+    // ---------- Extra cover: containers, barriers, sheds ----------
+    const CC = container.colors;
+    container(w, -25.5, -3, false, CC[0]);
+    container(w, -25.5, -3, false, CC[1], 2.6);
+    container(w, -25.5, 4, false, CC[2]);
+    container(w, 25.5, 3, false, CC[3]);
+    container(w, 27, -19, false, CC[4]);
+    container(w, 4, -44, false, CC[1]);
+    jersey(w, 0, -14, 3); jersey(w, -12, -15, 3, false);
+    jersey(w, 6, -34, 3); jersey(w, -6, -40, 3);
+    jersey(w, 16, -58, 3); jersey(w, -20, -47.6, 3); jersey(w, -21, -60.5, 3);
+    hesco(w, -22, -26, 3, false); hesco(w, -4, -48, 2);
+    lowWall(w, -3.5, -33, 2.5); lowWall(w, 4, -20, 2.5);
+    shed(w, -30.6, -24, -26.6, -19.5, 'e', M.wood());
+    shed(w, 13, -4, 17, 0, 'w', M.brick());
+    shed(w, -30.6, -61, -26.6, -56.5, 'e', M.concrete());
+    crate(w, 11, -6); crate(w, 11, -7.3); crate(w, 11, -6.6, 1.1, 1.2);
+    crateStack(w, -29, -30);
+    fireBarrel(w, -11, -27); fireBarrel(w, 19, -30); fireBarrel(w, 2, -57.5); fireBarrel(w, -27, -8.5);
+    // Sweeping searchlights (visual cones)
+    searchlight(g, 24, 7.3, -26, -Math.PI / 2, 1.0);
+    searchlight(g, 8.5, 3.6, -60.8, -0.3, 0.7);
 
     // Trees outside the walls for silhouette
     for (let i = 0; i < 24; i++) {
@@ -242,6 +268,34 @@ export const camp = {
     }
   },
 };
+
+const beamTex = (() => {
+  const c = document.createElement('canvas'); c.width = 4; c.height = 64;
+  const x = c.getContext('2d');
+  const gr = x.createLinearGradient(0, 0, 0, 64);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  x.fillStyle = gr; x.fillRect(0, 0, 4, 64);
+  return new THREE.CanvasTexture(c);
+})();
+
+/** A soft additive light cone that slowly sweeps the yard. Purely visual — no light source. */
+function searchlight(g, x, y, z, yaw0, speed) {
+  const len = 34;
+  const geo = new THREE.ConeGeometry(4.2, len, 16, 1, true);
+  geo.translate(0, -len / 2, 0);
+  geo.rotateX(-Math.PI / 2 + 0.32); // point along +Z, tilted down
+  const m = new THREE.MeshBasicMaterial({ color: 0xfff2cc, map: beamTex, transparent: true, opacity: 0.16, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const beam = new THREE.Mesh(geo, m);
+  beam.position.set(x, y, z);
+  g.scene.add(beam);
+  const head = box(0.5, 0.4, 0.6, mat(0xfff6d0, { emissive: 0xfff0c0, ei: 3 }), x, y, z);
+  g.scene.add(head);
+  g.world.anims.push((dt, t) => {
+    const yaw = yaw0 + Math.sin(t * 0.32 * speed) * 0.9;
+    beam.rotation.y = yaw; head.rotation.y = yaw;
+    m.opacity = g.alarm ? 0.22 : 0.15;
+  });
+}
 
 function makeTower(g, x, z) {
   const w = g.world;

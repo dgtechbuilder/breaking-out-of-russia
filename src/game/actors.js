@@ -51,8 +51,8 @@ export class Actor {
       _c.set(x, y + h - 0.17, z);
       const th = raySphere(o, d, _c, 0.17, maxT);
       if (th < best) { best = th; this._head = true; }
-      _mn.x = x - 0.27; _mn.y = y; _mn.z = z - 0.27;
-      _mx.x = x + 0.27; _mx.y = y + h - 0.33; _mx.z = z + 0.27;
+      _mn.x = x - 0.3; _mn.y = y; _mn.z = z - 0.3;
+      _mx.x = x + 0.3; _mx.y = y + h - 0.33; _mx.z = z + 0.3;
     } else {
       _mn.x = x - 0.5; _mn.y = y; _mn.z = z - 0.5;
       _mx.x = x + 0.5; _mx.y = y + 0.5; _mx.z = z + 0.5;

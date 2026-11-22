@@ -48,7 +48,7 @@ export class Player extends Actor {
     this.vmScene.add(this.vmHolder);
     this.vm = null;
 
-    this.body = makeHumanoid({ skin: look.skin, top: look.top, pants: look.pants, hat: look.hat, hatColor: look.hatColor, band: look.band, band2: look.band });
+    this.body = makeHumanoid({ skin: look.skin, top: look.top, pants: look.pants, hat: look.hat, hatColor: look.hatColor, band: look.band, band2: look.band, face: 'smile' });
     setLayer(this.body, 10 + index);
     game.scene.add(this.body);
 
@@ -109,6 +109,7 @@ export class Player extends Actor {
     this.switchT = 0.35;
     this.reloadT = 0;
     this.rebuildViewmodel();
+    audio.play('draw', null, 0.9);
   }
 
   cycle(dir) {

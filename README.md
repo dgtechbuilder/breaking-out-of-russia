@@ -50,6 +50,13 @@ works — ES modules just need to be served over HTTP, not opened as `file://`.)
   - **Stolen Mortar** (75, `B`) — shells the point you aim at; flattens fortified roadblocks.
 - **Pressure** — scout drones spot you and call in mortar fire; reinforcement trucks roll in on a
   visible countdown.
+- **Cover everywhere** — shipping containers, jersey barriers, sand-basket walls, sheds and ruined
+  houses break up every sightline. Barriers are 1.2 m tall: crouch to hide, stand to shoot over. In
+  the convoy, sandbags on the Ural's tailgate do the same job.
+- **A living world** — blocky, outlined characters with painted faces, a gradient sky with drifting
+  clouds (stars and a moon at night), distant artillery flashes and rumbles, sweeping searchlights,
+  burning barrels, smoking wrecks and waving flags. Static props are merged into a handful of draw
+  calls, so the busier levels render with fewer draw calls than before.
 
 ## Stages
 
@@ -91,7 +98,7 @@ icons under the minimap. Turn the phone sideways.
 index.html            menus, HUD styles, import map
 src/main.js           boot, menus, co-op lobby, main loop
 src/core/             input (keyboard/mouse, gamepad, touch), button glyphs, procedural audio,
-                      particles/FX, collision + A* nav, procedural models
+                      particles/FX, collision + A* nav + static batching, procedural models, sky
 src/game/             game orchestrator, player, aim assist, AI allies/enemies, drones/vehicles/projectiles,
                       weapons, momentum + call-ins, HUD, workbench
 src/stages/           camp.js, convoy.js, border.js (+ shared builders in common.js)
