@@ -1,10 +1,14 @@
 // Procedural low-poly models built from primitives.
 import * as THREE from 'three';
-import { boxGeo } from './world.js';
+import { boxGeo, bakeGeometry } from './world.js';
 
 const matCache = new Map();
+/**
+ * Cached MeshStandardMaterial. opts.edge (0..1) adds crisp, screen-space block outlines plus a
+ * soft bevel highlight to box faces in the fragment shader — no extra geometry or draw calls.
+ */
 export function mat(color, opts = {}) {
-  const key = `${color}|${opts.emissive || ''}|${opts.ei || ''}|${opts.rough || ''}|${opts.metal || ''}|${opts.transparent || ''}`;
+  const key = `${color}|${opts.emissive || ''}|${opts.ei || ''}|${opts.rough || ''}|${opts.metal || ''}|${opts.transparent || ''}|${opts.edge || ''}`;
   let m = matCache.get(key);
   if (!m) {
     m = new THREE.MeshStandardMaterial({
@@ -12,9 +16,53 @@ export function mat(color, opts = {}) {
       emissive: opts.emissive ?? 0x000000, emissiveIntensity: opts.ei ?? 1,
       transparent: !!opts.transparent, opacity: opts.opacity ?? 1,
     });
+    if (opts.edge) addEdges(m, opts.edge);
     matCache.set(key, m);
   }
   return m;
+}
+
+function edgeShader(shader) {
+  shader.uniforms.uEdge = this.userData.edgeU;
+  shader.vertexShader = 'varying vec2 vEdgeUv;\n' + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\n  vEdgeUv = uv;');
+  shader.fragmentShader = 'varying vec2 vEdgeUv;\nuniform float uEdge;\n' + shader.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>
+  {
+    vec2 eD = min(vEdgeUv, 1.0 - vEdgeUv);
+    vec2 ePx = eD / max(fwidth(vEdgeUv), vec2(1e-4));
+    float eP = min(ePx.x, ePx.y), eU = min(eD.x, eD.y);
+    float eLine = (1.0 - smoothstep(0.7, 1.9, eP)) * (1.0 - smoothstep(0.07, 0.14, eU));
+    float eBev = (1.0 - smoothstep(1.9, 6.0, eP)) * (1.0 - eLine) * (1.0 - smoothstep(0.12, 0.25, eU));
+    diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 0.16, eLine * uEdge);
+    diffuseColor.rgb *= 1.0 + eBev * 0.3 * uEdge;
+  }`);
+}
+export function addEdges(m, strength = 1) {
+  m.userData.edgeU = { value: strength };
+  m.onBeforeCompile = edgeShader;
+  return m;
+}
+
+/**
+ * Bake a group of static meshes into one mesh per material (a big draw-call saver for props
+ * built from many boxes). Returns a new Group positioned like the source.
+ */
+export function mergeGroup(src, { castShadow = true, receiveShadow = true } = {}) {
+  src.updateMatrixWorld(true);
+  const inv = new THREE.Matrix4().copy(src.matrixWorld).invert();
+  const byMat = new Map();
+  src.traverse((o) => {
+    if (!o.isMesh || Array.isArray(o.material)) return;
+    const m4 = new THREE.Matrix4().multiplyMatrices(inv, o.matrixWorld);
+    (byMat.get(o.material) || byMat.set(o.material, []).get(o.material)).push([o.geometry, m4]);
+  });
+  const out = new THREE.Group();
+  out.position.copy(src.position); out.rotation.copy(src.rotation); out.scale.copy(src.scale);
+  for (const [material, list] of byMat) {
+    const mesh = new THREE.Mesh(bakeGeometry(list), material);
+    mesh.castShadow = castShadow; mesh.receiveShadow = receiveShadow;
+    out.add(mesh);
+  }
+  return out;
 }
 
 export function box(w, h, d, material, x = 0, y = 0, z = 0, parent = null) {
@@ -157,78 +205,158 @@ export const PALETTE = {
   skinLight: [0xd9b49a, 0xc9a184, 0xe0bfa3, 0xb88e70],
 };
 
+// Hip height of the blocky character (legs below, torso above).
+export const HIP = 0.76;
+
+const faceCache = {};
+/** Painted face decal (shared texture): 'smile' for the squad, 'stern' for soldiers. */
+function faceMat(kind) {
+  if (faceCache[kind]) return faceCache[kind];
+  const c = document.createElement('canvas'); c.width = c.height = 64;
+  const x = c.getContext('2d');
+  x.lineCap = 'round'; x.lineJoin = 'round';
+  // Cartoon eyes: white with a dark outline and pupil, so they read on every skin tone.
+  for (const ex of [21, 43]) {
+    x.fillStyle = '#f4f1ea'; x.strokeStyle = '#111'; x.lineWidth = 2.2;
+    x.beginPath(); x.ellipse(ex, 26, 6, 7.5, 0, 0, Math.PI * 2); x.fill(); x.stroke();
+    x.fillStyle = '#111';
+    x.beginPath(); x.ellipse(ex + (kind === 'smile' ? 0.5 : 0), 27.5, 3, 4.2, 0, 0, Math.PI * 2); x.fill();
+  }
+  x.strokeStyle = '#111';
+  if (kind === 'smile') {
+    // Toothy grin
+    x.fillStyle = '#f4f1ea'; x.lineWidth = 2.4;
+    x.beginPath(); x.moveTo(20, 40); x.quadraticCurveTo(32, 56, 44, 40); x.closePath(); x.fill(); x.stroke();
+  } else {
+    // Angled brows and a hard, flat mouth.
+    x.lineWidth = 4;
+    x.beginPath(); x.moveTo(13, 14); x.lineTo(28, 19); x.moveTo(51, 14); x.lineTo(36, 19); x.stroke();
+    x.fillStyle = '#f4f1ea'; x.lineWidth = 2.4;
+    x.beginPath(); x.rect(23, 43, 18, 5); x.fill(); x.stroke();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 4;
+  const m = new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.35, roughness: 0.6, polygonOffset: true, polygonOffsetFactor: -2 });
+  faceCache[kind] = m;
+  return m;
+}
+let faceGeo = null;
+
+let charMat = null;
+const _bc = new THREE.Color();
+const partCache = new Map();
+function bakePart(part, skip, key) {
+  const meshes = part.children.filter((o) => o.isMesh && o !== skip);
+  if (meshes.length === 0) return;
+  charMat ||= addEdges(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.8, metalness: 0.05 }), 1);
+  for (const m of meshes) part.remove(m);
+  const cached = partCache.get(key);
+  if (cached) { part.add(new THREE.Mesh(cached, charMat)); return; }
+  const list = meshes.map((m) => {
+    m.updateMatrix();
+    const c = _bc.copy(m.material.color);
+    if (m.material.emissiveIntensity && m.material.emissive.getHex()) c.multiplyScalar(1.35);
+    return [m.geometry, m.matrix.clone(), c.clone()];
+  });
+  const geo = bakeGeometry(list);
+  geo.parameters = { shared: true }; // keep Game.dispose() from freeing a shared geometry
+  partCache.set(key, geo);
+  part.add(new THREE.Mesh(geo, charMat));
+}
+
 /**
- * Build a blocky soldier. Faces -Z. Feet at y=0. Parts exposed for animation.
- * opts: {skin, top, pants, hat:'helmet'|'ushanka'|'cap'|'beanie'|'hood'|null, hatColor, band, vest}
+ * Build a blocky, outlined character (classic block-avatar proportions: square head, 2:2:1
+ * torso, straight block limbs). Faces -Z. Feet at y=0. Parts exposed for animation.
+ * opts: {skin, top, pants, hat:'helmet'|'ushanka'|'cap'|'beanie'|'braids'|'ghillie'|null, hatColor, band, vest, face}
  */
 export function makeHumanoid(opts) {
   const root = new THREE.Group();
   const body = new THREE.Group(); // tilts when downed
   root.add(body);
-  const skin = mat(opts.skin);
-  const top = mat(opts.top);
-  const pants = mat(opts.pants);
-  const boots = mat(0x1d1b19);
+  const E = { edge: 1 };
+  const skin = mat(opts.skin, E);
+  const top = mat(opts.top, E);
+  const pants = mat(opts.pants, E);
+  const boots = mat(0x1d1b19, E);
   const parts = {};
 
-  const hips = new THREE.Group(); hips.position.y = 0.92; body.add(hips);
-  const legL = new THREE.Group(); legL.position.set(-0.11, 0, 0); hips.add(legL);
-  const legR = new THREE.Group(); legR.position.set(0.11, 0, 0); hips.add(legR);
-  box(0.17, 0.8, 0.19, pants, 0, -0.42, 0, legL);
-  box(0.17, 0.8, 0.19, pants, 0, -0.42, 0, legR);
-  box(0.18, 0.12, 0.27, boots, 0, -0.86, -0.04, legL);
-  box(0.18, 0.12, 0.27, boots, 0, -0.86, -0.04, legR);
+  const hips = new THREE.Group(); hips.position.y = HIP; body.add(hips);
+  const legL = new THREE.Group(); legL.position.set(-0.152, 0, 0); hips.add(legL);
+  const legR = new THREE.Group(); legR.position.set(0.152, 0, 0); hips.add(legR);
+  for (const leg of [legL, legR]) {
+    box(0.29, 0.62, 0.3, pants, 0, -0.31, 0, leg);
+    box(0.3, 0.15, 0.33, boots, 0, -0.685, -0.015, leg);
+  }
 
-  const torso = new THREE.Group(); torso.position.y = 0.92; body.add(torso);
-  box(0.46, 0.6, 0.26, top, 0, 0.32, 0, torso);
-  if (opts.vest) box(0.48, 0.38, 0.3, mat(opts.vest), 0, 0.36, 0, torso);
-  if (opts.hood) box(0.36, 0.14, 0.14, top, 0, 0.6, 0.12, torso);
-  const headG = new THREE.Group(); headG.position.y = 0.66; torso.add(headG);
-  box(0.24, 0.27, 0.25, skin, 0, 0.14, 0, headG);
-  box(0.25, 0.04, 0.02, mat(0x111111), 0, 0.17, -0.126, headG); // eyes strip shadow
+  const torso = new THREE.Group(); torso.position.y = HIP; body.add(torso);
+  box(0.62, 0.68, 0.31, top, 0, 0.34, 0, torso);
+  box(0.635, 0.07, 0.325, mat(0x2a221c, E), 0, 0.05, 0, torso); // belt
+  if (opts.vest) {
+    box(0.645, 0.42, 0.35, mat(opts.vest, E), 0, 0.4, 0, torso);
+    box(0.16, 0.12, 0.06, mat(opts.vest, E), -0.15, 0.27, -0.2, torso); // mag pouches
+    box(0.16, 0.12, 0.06, mat(opts.vest, E), 0.15, 0.27, -0.2, torso);
+  }
+  if (opts.hood) box(0.42, 0.14, 0.16, top, 0, 0.7, 0.13, torso);
+  const headG = new THREE.Group(); headG.position.y = 0.69; torso.add(headG);
+  box(0.38, 0.37, 0.36, skin, 0, 0.185, 0, headG);
+  if (!faceGeo) faceGeo = new THREE.PlaneGeometry(0.3, 0.3);
+  const face = new THREE.Mesh(faceGeo, faceMat(opts.face || 'stern'));
+  face.position.set(0, 0.185, -0.1815); face.rotation.y = Math.PI;
+  headG.add(face);
+  const hc = (d) => mat(opts.hatColor ?? d, E);
   if (opts.hat === 'helmet') {
-    box(0.3, 0.13, 0.31, mat(opts.hatColor ?? 0x4b5340, { rough: 0.6 }), 0, 0.3, 0, headG);
-    box(0.32, 0.03, 0.33, mat(opts.hatColor ?? 0x4b5340, { rough: 0.6 }), 0, 0.24, 0, headG);
+    box(0.44, 0.17, 0.43, hc(0x4b5340), 0, 0.42, 0.005, headG);
+    box(0.48, 0.05, 0.47, hc(0x4b5340), 0, 0.345, 0.005, headG);
+    box(0.24, 0.035, 0.02, mat(0x2b2f25, E), 0, 0.44, -0.222, headG); // strap band
   } else if (opts.hat === 'ushanka') {
-    box(0.31, 0.14, 0.31, mat(opts.hatColor ?? 0x5a5040), 0, 0.31, 0, headG);
-    box(0.06, 0.16, 0.2, mat(opts.hatColor ?? 0x5a5040), -0.15, 0.17, 0.02, headG);
-    box(0.06, 0.16, 0.2, mat(opts.hatColor ?? 0x5a5040), 0.15, 0.17, 0.02, headG);
+    box(0.44, 0.19, 0.42, hc(0x5a5040), 0, 0.44, 0.01, headG);
+    box(0.07, 0.22, 0.28, hc(0x5a5040), -0.215, 0.25, 0.03, headG);
+    box(0.07, 0.22, 0.28, hc(0x5a5040), 0.215, 0.25, 0.03, headG);
+    box(0.4, 0.07, 0.05, hc(0x5a5040), 0, 0.37, -0.205, headG); // front fold
   } else if (opts.hat === 'cap') {
-    box(0.27, 0.08, 0.27, mat(opts.hatColor ?? 0x333333), 0, 0.3, 0, headG);
-    box(0.24, 0.02, 0.12, mat(opts.hatColor ?? 0x333333), 0, 0.27, -0.17, headG);
+    box(0.41, 0.11, 0.39, hc(0x333333), 0, 0.42, 0.01, headG);
+    box(0.34, 0.03, 0.17, hc(0x333333), 0, 0.38, -0.26, headG);
   } else if (opts.hat === 'beanie') {
-    box(0.27, 0.12, 0.27, mat(opts.hatColor ?? 0x222222), 0, 0.31, 0, headG);
+    box(0.41, 0.16, 0.39, hc(0x222222), 0, 0.43, 0.01, headG);
+    box(0.42, 0.06, 0.4, hc(0x222222), 0, 0.37, 0.01, headG);
   } else if (opts.hat === 'braids') {
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 6) * Math.PI - Math.PI / 2;
-      box(0.04, 0.22, 0.04, mat(0x15100c), Math.sin(a) * 0.12, 0.12, Math.cos(a) * 0.1 + 0.03, headG);
-    }
-    box(0.26, 0.06, 0.26, mat(0x15100c), 0, 0.29, 0, headG);
+    const hair = mat(0x15100c, E);
+    box(0.4, 0.09, 0.38, hair, 0, 0.41, 0.01, headG);
+    box(0.4, 0.3, 0.08, hair, 0, 0.26, 0.205, headG);
+    for (let i = 0; i < 5; i++) box(0.055, 0.26, 0.055, hair, -0.15 + i * 0.075, 0.08, 0.235, headG);
   } else if (opts.hat === 'ghillie') {
-    box(0.36, 0.2, 0.36, mat(0xdfe3e0), 0, 0.27, 0.02, headG);
+    box(0.5, 0.25, 0.48, mat(0xdfe3e0, E), 0, 0.39, 0.03, headG);
+    box(0.44, 0.1, 0.05, mat(0xc9cdc9, E), 0, 0.33, -0.235, headG);
+  } else {
+    box(0.39, 0.05, 0.37, mat(0x15100c, E), 0, 0.395, 0.005, headG); // close-cropped hair
   }
   if (opts.band) {
-    box(0.48, 0.07, 0.28, mat(opts.band, { emissive: opts.band, ei: 0.25 }), 0, 0.56, 0, torso); // scarf/collar
+    box(0.66, 0.09, 0.345, mat(opts.band, { emissive: opts.band, ei: 0.25, edge: 1 }), 0, 0.63, 0, torso); // scarf/collar
   }
 
-  const armL = new THREE.Group(); armL.position.set(-0.3, 0.56, 0); torso.add(armL);
-  const armR = new THREE.Group(); armR.position.set(0.3, 0.56, 0); torso.add(armR);
-  box(0.13, 0.36, 0.14, top, 0, -0.17, 0, armL);
-  box(0.13, 0.36, 0.14, top, 0, -0.17, 0, armR);
-  const foreL = new THREE.Group(); foreL.position.y = -0.34; armL.add(foreL);
-  const foreR = new THREE.Group(); foreR.position.y = -0.34; armR.add(foreR);
-  box(0.12, 0.3, 0.13, top, 0, -0.14, 0, foreL);
-  box(0.12, 0.3, 0.13, top, 0, -0.14, 0, foreR);
-  box(0.1, 0.09, 0.1, skin, 0, -0.32, 0, foreL);
-  box(0.1, 0.09, 0.1, skin, 0, -0.32, 0, foreR);
-  if (opts.band2) box(0.14, 0.06, 0.15, mat(opts.band2, { emissive: opts.band2, ei: 0.4 }), 0, -0.1, 0, armL);
+  const armL = new THREE.Group(); armL.position.set(-0.455, 0.62, 0); torso.add(armL);
+  const armR = new THREE.Group(); armR.position.set(0.455, 0.62, 0); torso.add(armR);
+  box(0.28, 0.36, 0.29, top, 0, -0.12, 0, armL);
+  box(0.28, 0.36, 0.29, top, 0, -0.12, 0, armR);
+  const foreL = new THREE.Group(); foreL.position.y = -0.3; armL.add(foreL);
+  const foreR = new THREE.Group(); foreR.position.y = -0.3; armR.add(foreR);
+  box(0.27, 0.24, 0.28, top, 0, -0.12, 0, foreL);
+  box(0.27, 0.24, 0.28, top, 0, -0.12, 0, foreR);
+  box(0.25, 0.13, 0.26, skin, 0, -0.3, 0, foreL);
+  box(0.25, 0.13, 0.26, skin, 0, -0.3, 0, foreR);
+  if (opts.band2) box(0.3, 0.075, 0.31, mat(opts.band2, { emissive: opts.band2, ei: 0.4, edge: 1 }), 0, -0.14, 0, armL);
 
   // Gun pivot at chest, held forward.
-  const gunPivot = new THREE.Group(); gunPivot.position.set(0.08, 0.42, -0.28); torso.add(gunPivot);
+  const gunPivot = new THREE.Group(); gunPivot.position.set(0.1, 0.48, -0.3); torso.add(gunPivot);
+
+  // Collapse each limb's boxes into one vertex-coloured mesh: ~9 draw calls per character.
+  const lookKey = [opts.skin, opts.top, opts.pants, opts.hat, opts.hatColor, opts.band, opts.band2, opts.vest, opts.hood].join('|');
+  ['legL', 'legR', 'torso', 'headG', 'armL', 'armR', 'foreL', 'foreR'].forEach((n, i) => bakePart([legL, legR, torso, headG, armL, armR, foreL, foreR][i], face, lookKey + n));
 
   Object.assign(parts, { root, body, hips, legL, legR, torso, headG, armL, armR, foreL, foreR, gunPivot });
   root.userData.parts = parts;
-  root.traverse((o) => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = false; } });
+  root.traverse((o) => { if (o.isMesh) { o.castShadow = o !== face; o.receiveShadow = false; } });
   return root;
 }
 
@@ -250,8 +378,8 @@ export function animateHumanoid(model, s) {
   p.body.rotation.set(0, 0, 0);
   p.body.position.set(0, 0, 0);
   const crouch = s.crouch ? 1 : 0;
-  p.hips.position.y = 0.92 - crouch * 0.35;
-  p.torso.position.y = 0.92 - crouch * 0.35;
+  p.hips.position.y = HIP - crouch * 0.28;
+  p.torso.position.y = HIP - crouch * 0.28;
   if (crouch) { p.legL.rotation.x = -1.1 + sw * 0.3; p.legR.rotation.x = 0.2 - sw * 0.3; p.torso.rotation.x = -0.15; }
   else p.torso.rotation.x = 0;
   p.torso.rotation.y = 0;
@@ -271,12 +399,12 @@ export function animateHumanoid(model, s) {
     p.foreL.rotation.set(-0.2, 0, 0); p.foreR.rotation.set(-0.2, 0, 0);
   }
   if (s.reviving) {
-    p.hips.position.y = 0.45; p.torso.position.y = 0.45; p.torso.rotation.x = -0.6;
+    p.hips.position.y = 0.4; p.torso.position.y = 0.4; p.torso.rotation.x = -0.6;
     p.legL.rotation.x = -1.6; p.legR.rotation.x = -0.4;
   }
   if (s.roll) {
     // Tuck and tumble forward.
-    p.body.position.y = 0.55;
+    p.body.position.y = 0.5;
     p.body.rotation.x = -s.roll * Math.PI * 2;
     p.legL.rotation.x = -1.6; p.legR.rotation.x = -1.4;
     p.armL.rotation.set(-1.2, 0, -0.3); p.armR.rotation.set(-1.2, 0, 0.3);
@@ -374,22 +502,33 @@ export function makeDrone() {
 }
 
 // ---------------- Props ----------------
+const treeCache = {};
+/** Low-poly fir. Geometry is merged once per variant and shared; scale is applied on the group. */
 export function makeTree(scale = 1, snowy = true) {
-  const g = new THREE.Group();
-  cyl(0.15 * scale, 0.22 * scale, 2 * scale, mat(0x3d2b1f), 6, 0, scale, 0, g);
-  const leaf = mat(snowy ? 0x2f4a38 : 0x2f5a2c, { rough: 0.95 });
-  const snow = mat(0xe8eef2, { rough: 0.9 });
-  for (let i = 0; i < 3; i++) {
-    const h = (2.2 - i * 0.4) * scale, r = (1.6 - i * 0.4) * scale;
-    const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7), leaf);
-    c.position.y = (1.8 + i * 1.1) * scale; c.castShadow = true;
-    g.add(c);
-    if (snowy) {
-      const s = new THREE.Mesh(new THREE.ConeGeometry(r * 0.6, h * 0.35, 7), snow);
-      s.position.y = (1.8 + i * 1.1 + h * 0.33) * scale;
-      g.add(s);
+  const k = snowy ? 'snow' : 'green';
+  if (!treeCache[k]) {
+    const src = new THREE.Group();
+    cyl(0.15, 0.22, 2, mat(0x3d2b1f), 6, 0, 1, 0, src);
+    const leaf = mat(snowy ? 0x2f4a38 : 0x2f5a2c, { rough: 0.95 });
+    const snow = mat(0xe8eef2, { rough: 0.9 });
+    for (let i = 0; i < 3; i++) {
+      const h = 2.2 - i * 0.4, r = 1.6 - i * 0.4;
+      const c = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7), leaf);
+      c.position.y = 1.8 + i * 1.1; src.add(c);
+      if (snowy) {
+        const s = new THREE.Mesh(new THREE.ConeGeometry(r * 0.6, h * 0.35, 7), snow);
+        s.position.y = 1.8 + i * 1.1 + h * 0.33; src.add(s);
+      }
     }
+    treeCache[k] = mergeGroup(src).children.map((m) => [m.geometry, m.material]);
   }
+  const g = new THREE.Group();
+  for (const [geo, m] of treeCache[k]) {
+    const mesh = new THREE.Mesh(geo, m);
+    mesh.castShadow = m.color.getHex() !== 0xe8eef2; mesh.receiveShadow = false;
+    g.add(mesh);
+  }
+  g.scale.setScalar(scale);
   return g;
 }
 
@@ -397,7 +536,10 @@ export function makeFlag(colors) {
   const g = new THREE.Group();
   cyl(0.04, 0.04, 6, mat(0x777777, { metal: 0.6 }), 6, 0, 3, 0, g);
   const h = 0.7 / colors.length;
-  colors.forEach((c, i) => box(1.4, h, 0.02, mat(c, { emissive: c, ei: 0.15 }), 0.72, 5.6 - i * h, 0, g));
+  const cloth = new THREE.Group();
+  g.add(cloth);
+  colors.forEach((c, i) => box(1.4, h, 0.02, mat(c, { emissive: c, ei: 0.15 }), 0.72, 5.6 - i * h, 0, cloth));
+  g.userData.cloth = cloth;
   return g;
 }
 
